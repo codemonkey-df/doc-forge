@@ -77,6 +77,8 @@ def copy_validated_files_to_session(
 
 
 class _WorkflowProtocol(Protocol):
+    """Protocol for workflow invocation. Used for dependency injection in generate_document."""
+
     def invoke(self, initial_state: DocumentState) -> DocumentState: ...
 
 
@@ -116,7 +118,7 @@ def generate_document(
     if wf is None:
         from backend.graph import create_document_workflow
 
-        wf = create_document_workflow()
+        wf = create_document_workflow(session_manager=sm)
 
     valid_paths, errors = validate_requested_files(
         requested_paths, base_resolved, sanitizer=san
