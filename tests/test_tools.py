@@ -328,13 +328,13 @@ def test_rollback_to_checkpoint_nonexistent_raises(
 # --- get_tools ---
 
 
-def test_get_tools_returns_seven_tools(
+def test_get_tools_returns_eight_tools(
     session_with_inputs: tuple[str, SessionManager],
 ) -> None:
-    """GIVEN session_id / WHEN get_tools(session_id) / THEN returns list of 7 tools."""
+    """GIVEN session_id / WHEN get_tools(session_id) / THEN returns list of 8 tools (Story 2.3 adds request_human_input)."""
     session_id, sm = session_with_inputs
     tools = get_tools(session_id, session_manager=sm)
-    assert len(tools) == 7
+    assert len(tools) == 8
     names = {t.name for t in tools}
     assert names == {
         "list_files",
@@ -344,6 +344,7 @@ def test_get_tools_returns_seven_tools(
         "edit_markdown_line",
         "create_checkpoint",
         "rollback_to_checkpoint",
+        "request_human_input",
     }
 
 

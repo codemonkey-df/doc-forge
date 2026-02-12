@@ -14,6 +14,7 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
+from backend.agent import agent_node as agent_node_impl
 from backend.state import DocumentState
 from backend.utils.session_manager import SessionManager
 
@@ -81,12 +82,8 @@ def _human_input_node(state: DocumentState) -> DocumentState:
 
 
 def _agent_node(state: DocumentState) -> DocumentState:
-    """Stub: return state with status 'complete' so minimal workflow signals success to entry.
-
-    Agent loop will be implemented in later stories; for 2.1 we only route here when
-    no missing refs, then end the graph so entry can cleanup and report success.
-    """
-    return {**state, "status": "complete"}
+    """Single-step agent node (Story 2.3). One LLM invoke; returns state with messages, generation_complete, pending_question."""
+    return agent_node_impl(state)
 
 
 def create_document_workflow(

@@ -24,6 +24,23 @@ from backend.utils.session_manager import SessionManager
 logger = logging.getLogger(__name__)
 
 
+def _messages_to_strings(messages: list) -> list[str]:
+    """Convert state messages (possibly BaseMessage) to list[str] for GenerateResult."""
+    out: list[str] = []
+    for m in messages:
+        if hasattr(m, "content"):
+            c = getattr(m, "content", None)
+            if isinstance(c, str):
+                out.append(c)
+            elif isinstance(c, list):
+                out.append(" ".join(str(x) for x in c))
+            else:
+                out.append(str(m))
+        else:
+            out.append(str(m))
+    return out
+
+
 class GenerateResult(TypedDict, total=False):
     """Return type of generate_document.
 
@@ -146,12 +163,13 @@ def generate_document(
         status = result.get("status", "")
         archive = status == "complete"
         sm.cleanup(session_id, archive=archive)
+        raw_messages = result.get("messages", []) or []
         return {
             "success": status == "complete",
             "session_id": session_id,
             "output_path": result.get("output_docx_path", "") or "",
             "error": result.get("last_error", "") or "",
-            "messages": result.get("messages", []) or [],
+            "messages": _messages_to_strings(raw_messages),
         }
     except Exception as e:
         logger.exception("Workflow failed: session_id=%s", session_id)

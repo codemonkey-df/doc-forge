@@ -1,8 +1,11 @@
-"""Integration tests for document workflow graph (Story 2.1). GIVEN-WHEN-THEN."""
+"""Integration tests for document workflow graph (Story 2.1, 2.3). GIVEN-WHEN-THEN."""
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import pytest
+from langchain_core.messages import AIMessage
 from pathlib import Path
 
 from backend.state import build_initial_state
@@ -41,7 +44,7 @@ def session_manager(session_settings: SessionSettings) -> SessionManager:
 def test_graph_invoke_scan_assets_runs_and_uses_session_id_input_files(
     session_manager: SessionManager,
 ) -> None:
-    """GIVEN build_initial_state(session_id, ['a.txt']) and session with that file under inputs / WHEN invoke graph with session_manager / THEN scan_assets runs; result has session_id and input_files; flow goes to agent (status ends 'complete' from agent stub)."""
+    """GIVEN build_initial_state(session_id, ['a.txt']) and session with that file under inputs / WHEN invoke graph with session_manager / THEN scan_assets runs; result has session_id and input_files; flow goes to agent (status 'complete')."""
     from backend.graph import create_document_workflow
 
     session_id = session_manager.create()
@@ -51,13 +54,18 @@ def test_graph_invoke_scan_assets_runs_and_uses_session_id_input_files(
         "Plain text, no images.", encoding="utf-8"
     )
 
-    initial = build_initial_state(session_id, ["a.txt"])
-    workflow = create_document_workflow(session_manager=session_manager)
-    result = workflow.invoke(initial)
+    mock_ai = AIMessage(content="I have finished.", tool_calls=[])
+    with patch("backend.agent.get_llm") as mock_get_llm:
+        mock_llm = MagicMock()
+        mock_llm.bind_tools.return_value.invoke.return_value = mock_ai
+        mock_get_llm.return_value = mock_llm
+
+        initial = build_initial_state(session_id, ["a.txt"])
+        workflow = create_document_workflow(session_manager=session_manager)
+        result = workflow.invoke(initial)
 
     assert result["session_id"] == session_id
     assert result["input_files"] == ["a.txt"]
-    # No missing refs → agent path → agent stub sets status complete for entry
     assert result["status"] == "complete"
 
 
@@ -67,7 +75,7 @@ def test_graph_invoke_scan_assets_runs_and_uses_session_id_input_files(
 def test_scan_assets_no_missing_refs_routes_to_agent_status_processing(
     session_manager: SessionManager,
 ) -> None:
-    """GIVEN session with input file that has no image refs / WHEN invoke graph / THEN flow goes to agent: no pending_question, no missing_references, status 'complete' (agent stub)."""
+    """GIVEN session with input file that has no image refs / WHEN invoke graph / THEN flow goes to agent: no pending_question, no missing_references, status 'complete'."""
     from backend.graph import create_document_workflow
 
     session_id = session_manager.create()
@@ -77,9 +85,15 @@ def test_scan_assets_no_missing_refs_routes_to_agent_status_processing(
         "# Doc\n\nNo images here.", encoding="utf-8"
     )
 
-    initial = build_initial_state(session_id, ["doc.md"])
-    workflow = create_document_workflow(session_manager=session_manager)
-    result = workflow.invoke(initial)
+    mock_ai = AIMessage(content="I have finished.", tool_calls=[])
+    with patch("backend.agent.get_llm") as mock_get_llm:
+        mock_llm = MagicMock()
+        mock_llm.bind_tools.return_value.invoke.return_value = mock_ai
+        mock_get_llm.return_value = mock_llm
+
+        initial = build_initial_state(session_id, ["doc.md"])
+        workflow = create_document_workflow(session_manager=session_manager)
+        result = workflow.invoke(initial)
 
     assert not result.get("pending_question", "").strip()
     assert result.get("missing_references", []) == []

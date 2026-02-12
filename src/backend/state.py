@@ -22,6 +22,8 @@ from __future__ import annotations
 import operator
 from typing import Annotated, Literal, TypedDict
 
+from langchain_core.messages import BaseMessage
+
 
 class DocumentState(TypedDict, total=False):
     """State passed through the document generation workflow.
@@ -57,7 +59,7 @@ class DocumentState(TypedDict, total=False):
         "complete",
         "failed",
     ]
-    messages: Annotated[list[str], operator.add]
+    messages: Annotated[list[BaseMessage], operator.add]
     validation_passed: bool
     validation_issues: list[dict[str, str]]
     generation_complete: bool
@@ -95,7 +97,7 @@ def build_initial_state(session_id: str, input_files: list[str]) -> DocumentStat
         "last_error": "",
         "error_type": "",
         "retry_count": 0,
-        "missing_references": [],
+"missing_references": [],
         "user_decisions": {},
         "pending_question": "",
         "status": "scanning_assets",

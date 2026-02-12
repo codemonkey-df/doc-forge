@@ -151,7 +151,7 @@ def edit_markdown_line(
     line_number: int,
     new_content: str,
     session_id: str,
-    session_manager: SessionManager | None = None,
+session_manager: SessionManager | None = None,
 ) -> str:
     """Replace line at 1-based index in temp_output.md (FC005). Validates line_number in range.
 
@@ -209,6 +209,22 @@ def rollback_to_checkpoint(
     return f"Restored from checkpoint {checkpoint_id}"
 
 
+def request_human_input(
+    question: str,
+    session_id: str,
+    session_manager: SessionManager | None = None,
+) -> str:
+    """Signal that the agent needs user input (FC006). Returns the question string.
+
+    When this tool is called, the tools node (Story 2.5) can set state['pending_question']
+    from the return value so the graph routes to human_input. Use when you encounter
+    a missing external file reference or need the user to upload/skip.
+    """
+    if not question or not str(question).strip():
+        return "Please provide user input or skip."
+    return str(question).strip()
+
+
 def get_tools(
     session_id: str,
     session_manager: SessionManager | None = None,
@@ -241,6 +257,9 @@ def get_tools(
 
     def _rollback_to_checkpoint(checkpoint_id: str) -> str:
         return rollback_to_checkpoint(checkpoint_id, session_id, session_manager=sm)
+
+    def _request_human_input(question: str) -> str:
+        return request_human_input(question, session_id, session_manager=sm)
 
     return [
         StructuredTool.from_function(
@@ -277,5 +296,10 @@ def get_tools(
             func=_rollback_to_checkpoint,
             name="rollback_to_checkpoint",
             description="Restore temp_output.md from a checkpoint (FC009). Pass the checkpoint_id returned by create_checkpoint (basename only).",
+        ),
+        StructuredTool.from_function(
+            func=_request_human_input,
+            name="request_human_input",
+            description="Ask the user for input (FC006). Call when you find a missing external file reference or need the user to upload/skip. Pass the question to show the user. The workflow will pause for human input.",
         ),
     ]

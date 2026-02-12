@@ -12,6 +12,9 @@ Override via env vars, e.g.:
   SESSIONS_DIR=sessions
   ARCHIVE_DIR=archive
 
+LLMSettings is loaded from environment (LLM_MODEL, LLM_TEMPERATURE). No API keys in code;
+LiteLLM reads OPENAI_API_KEY / ANTHROPIC_API_KEY etc. from env.
+
 Extensions are normalized to lowercase for case-insensitive matching.
 All extensions must start with a dot (e.g. .txt).
 """
@@ -86,3 +89,25 @@ class SessionSettings(BaseSettings):
     def resolve_base_path(cls, v: Path) -> Path:
         """Resolve docs_base_path to absolute for deterministic behavior."""
         return v.resolve()
+
+
+class LLMSettings(BaseSettings):
+    """Settings for LLM (LiteLLM). Loaded from env: LLM_MODEL, LLM_TEMPERATURE.
+
+    API keys are not stored here; LiteLLM reads OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.
+    """
+
+    model_config = SettingsConfigDict(
+        extra="ignore",
+    )
+
+    model: str = Field(
+        default="gpt-4o-mini",
+        description="LiteLLM model name (e.g. gpt-4, gpt-4o-mini, claude-3-5-sonnet-20241022)",
+    )
+    temperature: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=2.0,
+        description="LLM temperature (0.0–2.0)",
+    )
