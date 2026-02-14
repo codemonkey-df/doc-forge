@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from backend.state import DocumentState
+from backend.tools import get_tools
 from backend.utils.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
@@ -330,31 +331,78 @@ def _get_iso_timestamp() -> str:
 
 
 def tools_node(state: DocumentState) -> DocumentState:
-    """Custom tools node: execute tools and update state from results (AC2.5.1, 2.5.2).
+    """Execute tools and update state from results (AC2.5.1, AC2.5.2).
 
-    After LangGraph's ToolNode executes tool calls, this node:
-    1. Parses last message for tool results
-    2. Sets last_checkpoint_id if create_checkpoint was called
-    3. Sets pending_question if request_human_input was called
+    Workflow:
+    1. Extract session_id and messages from state
+    2. Invoke LangGraph ToolNode with tools from get_tools(session_id)
+    3. Execute all tool calls from agent's last AIMessage
+    4. Parse returned ToolMessages to extract special tool results:
+       - create_checkpoint: set state["last_checkpoint_id"] = content
+       - request_human_input: set state["pending_question"] = content
+    5. Return merged state with updated messages and extracted fields
 
-    This enables route_after_tools to access these fields for conditional routing.
-
-    Note: This is a stub implementation. In practice, this integrates with
-    LangGraph's ToolNode. For now, this documents the expected behavior.
+    AC2.5.1: Completes agent → tools → routing loop
+    AC2.5.2: Updates state fields used by route_after_tools for routing decisions
 
     Args:
-        state: DocumentState with messages from agent/tools loop.
+        state: DocumentState with agent-generated messages containing tool_calls.
 
     Returns:
-        Updated DocumentState with last_checkpoint_id and pending_question
-        set from tool results if applicable.
+        Updated DocumentState with:
+        - messages: appended with ToolMessages (via reducer operator.add)
+        - last_checkpoint_id: set if create_checkpoint was called
+        - pending_question: set if request_human_input was called
     """
-    # TODO: Integrate with actual ToolNode to extract tool results
-    # For now, this documents the expected pattern:
-    #
-    # if last_message is ToolMessage and message.name == "create_checkpoint":
-    #     state["last_checkpoint_id"] = message.content
-    # if last_message is ToolMessage and message.name == "request_human_input":
-    #     state["pending_question"] = message.content
+    from langgraph.prebuilt import ToolNode
+    from langchain_core.messages import ToolMessage
 
-    return state
+    session_id = state.get("session_id", "")
+    messages = state.get("messages", [])
+
+    # Get tools for this session
+    tools = get_tools(session_id)
+
+    # Create and invoke ToolNode
+    tool_node = ToolNode(tools)
+    try:
+        tool_result = tool_node.invoke({"messages": messages})
+    except Exception as e:
+        logger.error("ToolNode invocation failed: %s", e)
+        # Return state unchanged on error (graceful fallback)
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "last_error": f"Tool execution error: {str(e)}",
+                "error_type": "tool_execution",
+            },
+        )
+
+    # Extract tool results from ToolMessages
+    extracted_checkpoint_id = state.get("last_checkpoint_id", "")
+    extracted_pending_question = state.get("pending_question", "")
+
+    new_messages = tool_result.get("messages", [])
+    for msg in new_messages:
+        if isinstance(msg, ToolMessage):
+            # Extract checkpoint_id from create_checkpoint result
+            if msg.name == "create_checkpoint" and msg.content:
+                extracted_checkpoint_id = msg.content if isinstance(msg.content, str) else str(msg.content)
+
+            # Extract pending_question from request_human_input result
+            elif msg.name == "request_human_input" and msg.content:
+                # Don't overwrite if agent already set it
+                if not extracted_pending_question:
+                    extracted_pending_question = msg.content if isinstance(msg.content, str) else str(msg.content)
+
+    # Merge and return updated state
+    return cast(
+        DocumentState,
+        {
+            **state,
+            "messages": new_messages,  # Reducer will append via operator.add
+            "last_checkpoint_id": extracted_checkpoint_id,
+            "pending_question": extracted_pending_question,
+        },
+    )

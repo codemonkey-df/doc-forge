@@ -27,7 +27,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from backend.agent import agent_node as agent_node_impl
-from backend.graph_nodes import parse_to_json_node, validate_md_node
+from backend.graph_nodes import parse_to_json_node, tools_node, validate_md_node
 from backend.routing import route_after_tools
 from backend.state import DocumentState
 from backend.utils.session_manager import SessionManager
@@ -132,6 +132,7 @@ def create_document_workflow(
     workflow.add_node("scan_assets", scan_assets_node)
     workflow.add_node("human_input", _human_input_node)
     workflow.add_node("agent", _agent_node)
+    workflow.add_node("tools", tools_node)
     workflow.add_node("validate_md", validate_md_node)
     workflow.add_node("parse_to_json", parse_to_json_node)
 
@@ -149,20 +150,39 @@ def create_document_workflow(
     # Edge: human_input → agent (after interrupt resolved, resume to agent)
     workflow.add_edge("human_input", "agent")
 
-    # Conditional edge 2: agent → human_input | validate_md | parse_to_json | agent (interrupt point 2)
-    # Priority: pending_question > last_checkpoint_id > generation_complete > agent
-    # If pending_question set, pause at human_input (interrupt point 2)
-    # Otherwise, apply routing logic to decide next step
+    # Conditional edge 2: agent → human_input | tools (interrupt point 2)
+    # Route to tools if agent generated tool_calls, otherwise route to human_input if pending_question set
     def agent_routing(s: DocumentState) -> str:
-        """Route from agent: prioritize human_input, then apply route_after_tools logic."""
+        """Route from agent: prioritize human_input, then check for tool_calls to route to tools."""
+        # Check 1: Agent set pending_question (from content analysis)
         if s.get("pending_question") and str(s["pending_question"]).strip():
             return "human_input"
-        # Apply route_after_tools logic for the rest
-        return route_after_tools(s)
+
+        # Check 2: Agent generated tool_calls
+        messages = s.get("messages", [])
+        if messages:
+            from langchain_core.messages import AIMessage
+            last_msg = messages[-1]
+            if isinstance(last_msg, AIMessage) and getattr(last_msg, "tool_calls", None):
+                return "tools"
+
+        # Fallback (shouldn't happen in normal flow, but default to human_input to prevent silent failures)
+        return "human_input"
 
     workflow.add_conditional_edges(
         "agent",
         agent_routing,
+        {
+            "human_input": "human_input",
+            "tools": "tools",
+        },
+    )
+
+    # Conditional edge 3: tools → human_input | validate_md | parse_to_json | agent
+    # Route after tools are executed, using route_after_tools
+    workflow.add_conditional_edges(
+        "tools",
+        route_after_tools,
         {
             "human_input": "human_input",
             "validate": "validate_md",
