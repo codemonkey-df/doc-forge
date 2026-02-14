@@ -151,7 +151,7 @@ def edit_markdown_line(
     line_number: int,
     new_content: str,
     session_id: str,
-session_manager: SessionManager | None = None,
+    session_manager: SessionManager | None = None,
 ) -> str:
     """Replace line at 1-based index in temp_output.md (FC005). Validates line_number in range.
 

@@ -97,7 +97,7 @@ def build_initial_state(session_id: str, input_files: list[str]) -> DocumentStat
         "last_error": "",
         "error_type": "",
         "retry_count": 0,
-"missing_references": [],
+        "missing_references": [],
         "user_decisions": {},
         "pending_question": "",
         "status": "scanning_assets",

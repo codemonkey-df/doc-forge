@@ -1,20 +1,19 @@
-"""Minimal LangGraph workflow for Story 1.4, 2.1, 2.4: START → scan_assets → human_input | agent → END.
+"""LangGraph workflow for document generation (Stories 1.4, 2.1-2.5).
 
-Session is not created in the graph; entry provides state with session_id and
-input_files. scan_assets reads from state only (session_id, input_files) and
-uses SessionManager.get_path for session root; no SessionManager.create in graph.
+Story 1.4, 2.1: START → scan_assets → agent → END
+  Session not created in graph; entry provides session_id and input_files.
+  scan_assets detects missing image refs and routes to human_input if needed.
 
-Story 2.4 adds: checkpointer (MemorySaver) for interrupt/resume, interrupt_before=["human_input"]
-to pause at human_input node, and conditional edge from agent → human_input when pending_question
-(second interrupt point for external references during generation).
+Story 2.4: Add checkpointer, interrupt_before, and human_input node for HITL.
+  Two interrupt points:
+  1. scan_assets → human_input (missing refs detected)
+  2. agent → human_input (pending_question set during generation)
 
-Resume flow (caller-managed):
-  1. Entry: workflow.invoke(initial_state, config) with thread_id in config
-  2. Graph: detects missing_references, routes to human_input (interrupt)
-  3. Caller: receives state, collects user decisions, validates upload paths
-  4. Caller: updates state["user_decisions"], clears state["pending_question"]
-  5. Caller: workflow.invoke(None, config) with same thread_id to resume
-  6. Graph: human_input node runs, continues to agent, completes workflow
+Story 2.5: Wire agent ↔ tools loop with routing.
+  agent → tools → route_after_tools → (agent | validate | human_input | complete)
+  - validate_md: run markdownlint, return to agent if issues
+  - parse_to_json: write structure.json stub for conversion epic
+  - route_after_tools: priority (pending_question > checkpoint > complete > agent)
 """
 
 from __future__ import annotations
@@ -28,6 +27,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from backend.agent import agent_node as agent_node_impl
+from backend.graph_nodes import parse_to_json_node, validate_md_node
+from backend.routing import route_after_tools
 from backend.state import DocumentState
 from backend.utils.session_manager import SessionManager
 
@@ -102,24 +103,23 @@ def _agent_node(state: DocumentState) -> DocumentState:
 def create_document_workflow(
     session_manager: SessionManager | None = None,
 ) -> Any:
-    """Build and compile the document workflow. Graph starts at scan_assets (Story 2.1, 2.4).
+    """Build and compile the document workflow (Stories 1.4, 2.1, 2.4, 2.5).
 
-    Entry injects session_manager so scan_assets can resolve session path.
+    Graph structure:
+      scan_assets → (agent ↔ tools) → route_after_tools → (agent | validate_md | human_input | parse_to_json) → END
 
-    Story 2.4 additions (interrupt/resume for human-in-the-loop):
-    - Checkpointer: MemorySaver allows saving/restoring state at thread_id
-    - interrupt_before=["human_input"]: graph pauses before human_input node
-      (first interrupt point: when missing_references detected in scan_assets)
-    - Conditional edge from agent to human_input when pending_question is set
-      (second interrupt point: when agent detects external reference during generation)
-    - Resume flow: caller invokes workflow.invoke(None, config) with same thread_id
-      after updating state["user_decisions"] and clearing state["pending_question"]
+    Story 2.5 additions:
+    - tools node executes tool calls and updates state (last_checkpoint_id, pending_question)
+    - route_after_tools conditional routing (priority: pending_question > checkpoint > complete > agent)
+    - validate_md node runs markdownlint, routes back to agent on issues
+    - parse_to_json stub writes structure.json for conversion epic
+    - Conditional edges wire the loop
 
     Args:
         session_manager: Optional SessionManager for dependency injection (test/mock friendly).
 
     Returns:
-        Compiled graph with checkpointer and interrupt_before support.
+        Compiled graph with checkpointer, interrupt_before, and full routing support.
     """
     sm = session_manager if session_manager is not None else SessionManager()
 
@@ -127,33 +127,57 @@ def create_document_workflow(
         return _scan_assets_impl(state, sm)
 
     workflow = StateGraph(DocumentState)
+
+    # Add all nodes
     workflow.add_node("scan_assets", scan_assets_node)
     workflow.add_node("human_input", _human_input_node)
     workflow.add_node("agent", _agent_node)
+    workflow.add_node("validate_md", validate_md_node)
+    workflow.add_node("parse_to_json", parse_to_json_node)
 
+    # Entry point
     workflow.add_edge(START, "scan_assets")
 
-    # Conditional edge 1: scan_assets → human_input | agent
-    # Task 1: If missing_references non-empty, route to human_input (interrupt point 1)
+    # Conditional edge 1: scan_assets → agent | human_input (interrupt point 1)
+    # If missing_references detected, pause at human_input
     workflow.add_conditional_edges(
         "scan_assets",
         lambda s: "human_input" if s.get("missing_references") else "agent",
         {"human_input": "human_input", "agent": "agent"},
     )
 
-    # Task 4: Edge from human_input to agent (after interrupt is resolved, resume to agent)
+    # Edge: human_input → agent (after interrupt resolved, resume to agent)
     workflow.add_edge("human_input", "agent")
 
-    # Conditional edge 2: agent → human_input | END
-    # Task 5: If pending_question set, route to human_input (interrupt point 2)
-    # pending_question is set when agent detects external reference during generation
+    # Conditional edge 2: agent → human_input | validate_md | parse_to_json | agent (interrupt point 2)
+    # Priority: pending_question > last_checkpoint_id > generation_complete > agent
+    # If pending_question set, pause at human_input (interrupt point 2)
+    # Otherwise, apply routing logic to decide next step
+    def agent_routing(s: DocumentState) -> str:
+        """Route from agent: prioritize human_input, then apply route_after_tools logic."""
+        if s.get("pending_question") and str(s["pending_question"]).strip():
+            return "human_input"
+        # Apply route_after_tools logic for the rest
+        return route_after_tools(s)
+
     workflow.add_conditional_edges(
         "agent",
-        lambda s: "human_input" if s.get("pending_question") else "END",
-        {"human_input": "human_input", "END": END},
+        agent_routing,
+        {
+            "human_input": "human_input",
+            "validate": "validate_md",
+            "complete": "parse_to_json",
+            "agent": "agent",
+        },
     )
 
-    # Task 6: Compile with checkpointer and interrupt_before (Story 2.4)
+    # Edge: validate_md → agent (always route back to agent for fixes or next chapter)
+    workflow.add_edge("validate_md", "agent")
+
+    # Edge: parse_to_json → END (conversion complete)
+    workflow.add_edge("parse_to_json", END)
+
+    # Compile with checkpointer and interrupt_before (Story 2.4)
     checkpointer = MemorySaver()
     return workflow.compile(
         checkpointer=checkpointer,
