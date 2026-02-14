@@ -256,7 +256,7 @@ def test_generate_document_workflow_raises_cleanup_called_with_archive_false(
     session_manager.cleanup = cleanup_spy
 
     class FailingWorkflow:
-        def invoke(self, initial_state: dict) -> dict:
+        def invoke(self, initial_state: dict, config: dict | None = None) -> dict:
             raise ValueError("simulated failure")
 
     result = generate_document(
@@ -293,7 +293,8 @@ def test_graph_receives_pre_filled_state_no_session_create(
         mock_get_llm.return_value = mock_llm
 
         workflow = create_document_workflow()
-        result = workflow.invoke(initial)
+        config = {"configurable": {"thread_id": "test-entry-1"}}
+        result = workflow.invoke(initial, config)
 
     assert result["session_id"] == session_id
     assert result["input_files"] == ["a.txt"]
@@ -315,6 +316,7 @@ def test_graph_starts_at_scan_assets(
         mock_get_llm.return_value = mock_llm
 
         workflow = create_document_workflow()
-        result = workflow.invoke(initial)
+        config = {"configurable": {"thread_id": "test-entry-2"}}
+        result = workflow.invoke(initial, config)
     assert result["session_id"] == session_id
     assert result["input_files"] == ["f.txt"]

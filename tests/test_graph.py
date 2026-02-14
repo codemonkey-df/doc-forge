@@ -62,7 +62,8 @@ def test_graph_invoke_scan_assets_runs_and_uses_session_id_input_files(
 
         initial = build_initial_state(session_id, ["a.txt"])
         workflow = create_document_workflow(session_manager=session_manager)
-        result = workflow.invoke(initial)
+        config = {"configurable": {"thread_id": "test-graph-1"}}
+        result = workflow.invoke(initial, config)
 
     assert result["session_id"] == session_id
     assert result["input_files"] == ["a.txt"]
@@ -93,7 +94,8 @@ def test_scan_assets_no_missing_refs_routes_to_agent_status_processing(
 
         initial = build_initial_state(session_id, ["doc.md"])
         workflow = create_document_workflow(session_manager=session_manager)
-        result = workflow.invoke(initial)
+        config = {"configurable": {"thread_id": "test-graph-2"}}
+        result = workflow.invoke(initial, config)
 
     assert not result.get("pending_question", "").strip()
     assert result.get("missing_references", []) == []
@@ -116,7 +118,8 @@ def test_scan_assets_with_missing_refs_routes_to_human_input(
 
     initial = build_initial_state(session_id, ["with_img.md"])
     workflow = create_document_workflow(session_manager=session_manager)
-    result = workflow.invoke(initial)
+    config = {"configurable": {"thread_id": "test-graph-3"}}
+    result = workflow.invoke(initial, config)
 
     assert len(result.get("missing_references", [])) > 0
     assert result.get("pending_question", "").strip() != ""
