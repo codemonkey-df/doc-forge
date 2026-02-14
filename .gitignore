@@ -10,3 +10,5 @@ wheels/
 # Virtual environments
 .venv
 .prompts.md
+.claude
+.DS_Store

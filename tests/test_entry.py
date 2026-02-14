@@ -1,10 +1,12 @@
-"""Unit and integration tests for entry flow and session lifecycle (Story 1.4). GIVEN-WHEN-THEN."""
+"""Unit and integration tests for entry flow and session lifecycle (Story 1.4, 2.3). GIVEN-WHEN-THEN."""
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
+from langchain_core.messages import AIMessage
 from pathlib import Path
-from unittest.mock import Mock
 
 from backend.state import build_initial_state
 from backend.utils.session_manager import SessionManager
@@ -194,7 +196,15 @@ def test_generate_document_happy_path_creates_session_and_copies(
     (temp_base / "valid.txt").write_text("hello", encoding="utf-8")
     requested = [str(temp_base / "valid.txt")]
 
-    result = generate_document(requested, temp_base, session_manager=session_manager)
+    mock_ai = AIMessage(content="I have finished.", tool_calls=[])
+    with patch("backend.agent.get_llm") as mock_get_llm:
+        mock_llm = MagicMock()
+        mock_llm.bind_tools.return_value.invoke.return_value = mock_ai
+        mock_get_llm.return_value = mock_llm
+
+        result = generate_document(
+            requested, temp_base, session_manager=session_manager
+        )
 
     assert result["success"] is True
     assert "session_id" in result
@@ -218,9 +228,15 @@ def test_generate_document_cleanup_called_after_invoke(
     cleanup_spy = Mock(wraps=session_manager.cleanup)
     session_manager.cleanup = cleanup_spy
 
-    result = generate_document(
-        [str(temp_base / "one.txt")], temp_base, session_manager=session_manager
-    )
+    mock_ai = AIMessage(content="I have finished.", tool_calls=[])
+    with patch("backend.agent.get_llm") as mock_get_llm:
+        mock_llm = MagicMock()
+        mock_llm.bind_tools.return_value.invoke.return_value = mock_ai
+        mock_get_llm.return_value = mock_llm
+
+        result = generate_document(
+            [str(temp_base / "one.txt")], temp_base, session_manager=session_manager
+        )
 
     cleanup_spy.assert_called_once()
     call_args = cleanup_spy.call_args
@@ -240,7 +256,7 @@ def test_generate_document_workflow_raises_cleanup_called_with_archive_false(
     session_manager.cleanup = cleanup_spy
 
     class FailingWorkflow:
-        def invoke(self, initial_state: dict) -> dict:
+        def invoke(self, initial_state: dict, config: dict | None = None) -> dict:
             raise ValueError("simulated failure")
 
     result = generate_document(
@@ -270,13 +286,18 @@ def test_graph_receives_pre_filled_state_no_session_create(
 
     session_id = session_manager.create()
     initial = build_initial_state(session_id, ["a.txt"])
-    workflow = create_document_workflow()
+    mock_ai = AIMessage(content="I have finished.", tool_calls=[])
+    with patch("backend.agent.get_llm") as mock_get_llm:
+        mock_llm = MagicMock()
+        mock_llm.bind_tools.return_value.invoke.return_value = mock_ai
+        mock_get_llm.return_value = mock_llm
 
-    result = workflow.invoke(initial)
+        workflow = create_document_workflow()
+        config = {"configurable": {"thread_id": "test-entry-1"}}
+        result = workflow.invoke(initial, config)
 
     assert result["session_id"] == session_id
     assert result["input_files"] == ["a.txt"]
-    # Graph does not create session; it only receives state (scan_assets stub may set status)
     assert "status" in result
 
 
@@ -288,7 +309,14 @@ def test_graph_starts_at_scan_assets(
 
     session_id = session_manager.create()
     initial = build_initial_state(session_id, ["f.txt"])
-    workflow = create_document_workflow()
-    result = workflow.invoke(initial)
+    mock_ai = AIMessage(content="I have finished.", tool_calls=[])
+    with patch("backend.agent.get_llm") as mock_get_llm:
+        mock_llm = MagicMock()
+        mock_llm.bind_tools.return_value.invoke.return_value = mock_ai
+        mock_get_llm.return_value = mock_llm
+
+        workflow = create_document_workflow()
+        config = {"configurable": {"thread_id": "test-entry-2"}}
+        result = workflow.invoke(initial, config)
     assert result["session_id"] == session_id
     assert result["input_files"] == ["f.txt"]
