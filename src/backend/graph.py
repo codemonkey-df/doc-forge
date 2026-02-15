@@ -19,7 +19,6 @@ Story 2.5: Wire agent ↔ tools loop with routing.
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 from typing import Any
 
@@ -29,65 +28,154 @@ from langgraph.graph import END, START, StateGraph
 from backend.agent import agent_node as agent_node_impl
 from backend.graph_nodes import parse_to_json_node, tools_node, validate_md_node
 from backend.routing import route_after_tools
-from backend.state import DocumentState
+from backend.state import DocumentState, ImageRefResult
+from backend.utils.image_scanner import extract_image_refs, resolve_image_path
 from backend.utils.session_manager import SessionManager
+from backend.utils.settings import AssetScanSettings
 
 logger = logging.getLogger(__name__)
-
-# Markdown image syntax: ![alt](path)
-IMAGE_REF_PATTERN = re.compile(r"!\[.*?\]\((.*?)\)")
 
 
 def _scan_assets_impl(
     state: DocumentState, session_manager: SessionManager
 ) -> DocumentState:
-    """Read input files, detect image refs (regex), set missing_references and pending_question or status=processing.
+    """Scan input files for image references, resolve paths, and classify found/missing (Story 3.1).
 
-    Uses only state["session_id"] and state["input_files"]; does not create session.
+    Implements AC3.1.1-3.1.6:
+    1. Extract markdown image refs: ![alt](path)
+    2. Classify each path: URL (skip), relative (resolve to input dir), absolute (validate under base)
+    3. Check existence: found vs missing
+    4. Track source_file for each ref (for Story 3.4 placeholder targeting)
+    5. Populate state: found_image_refs, missing_references, pending_question, status
+    6. Log per-file and per-ref events
+
+    Args:
+        state: DocumentState with session_id and input_files
+        session_manager: SessionManager for path resolution
+
+    Returns:
+        Updated state with found_image_refs, missing_references, and routing decision
     """
     session_id = state["session_id"]
     input_files = state["input_files"]
     session_path = session_manager.get_path(session_id)
     inputs_dir = session_path / "inputs"
 
+    # Load asset scan settings (allowed_base_path, etc.)
+    settings = AssetScanSettings()
+    allowed_base = settings.allowed_base_path if settings.allowed_base_path else inputs_dir
+
+    found_refs: list[ImageRefResult] = []
     missing_refs: list[str] = []
 
+    # Scan each input file
     for filename in input_files:
         file_path = inputs_dir / filename
         if not file_path.exists():
+            logger.warning("Input file not found: %s", file_path)
             continue
+
         try:
             content = file_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as e:
             logger.warning("Skipping file %s: %s", file_path, e)
             continue
-        for match in IMAGE_REF_PATTERN.finditer(content):
-            ref = match.group(1).strip()
-            if ref.startswith("http"):
-                continue
-            # Resolve in order: inputs dir, session root, then absolute path
-            candidate = (inputs_dir / ref).resolve()
-            if not candidate.exists():
-                candidate = (session_path / ref).resolve()
-            if not candidate.exists():
-                try:
-                    candidate = Path(ref).resolve()
-                except (OSError, ValueError):
-                    pass
-            if not candidate.exists():
-                missing_refs.append(ref)
+
+        # Extract all image refs from this file
+        refs = extract_image_refs(content)
+        logger.info(
+            "refs_scanned",
+            extra={
+                "session_id": session_id,
+                "filename": filename,
+                "ref_count": len(refs),
+            },
+        )
+
+        # Classify each ref
+        found_count = 0
+        missing_count = 0
+        for original_path in refs:
+            # Resolve path (URL/relative/absolute)
+            resolved = resolve_image_path(
+                original_path,
+                inputs_dir,
+                allowed_base,
+            )
+
+            if resolved is None:
+                # URL or missing
+                missing_refs.append(original_path)
+                missing_count += 1
+                logger.info(
+                    "image_ref_missing",
+                    extra={
+                        "session_id": session_id,
+                        "filename": filename,
+                        "original_path": original_path,
+                    },
+                )
+            else:
+                # Found
+                found_refs.append(
+                    {
+                        "original_path": original_path,
+                        "resolved_path": str(resolved),
+                        "source_file": filename,
+                    }
+                )
+                found_count += 1
+                logger.info(
+                    "image_ref_found",
+                    extra={
+                        "session_id": session_id,
+                        "filename": filename,
+                        "original_path": original_path,
+                        "resolved_path": str(resolved),
+                    },
+                )
+
+        logger.info(
+            "file_scan_complete",
+            extra={
+                "session_id": session_id,
+                "filename": filename,
+                "found": found_count,
+                "missing": missing_count,
+            },
+        )
+
+    # Update state
+    new_state: DocumentState = {
+        **state,
+        "found_image_refs": found_refs,
+        "missing_references": missing_refs,
+    }
 
     if missing_refs:
-        return {
-            **state,
-            "missing_references": missing_refs,
-            "pending_question": f"Missing images: {', '.join(missing_refs)}. Upload or skip?",
-            "status": "scanning_assets",
-        }
-    return {
-        **state,
-        "status": "processing",
-    }
+        # Route to human_input for missing ref resolution
+        new_state["pending_question"] = (
+            f"Found {len(missing_refs)} missing image(s): "
+            f"{', '.join(missing_refs[:3])}{'...' if len(missing_refs) > 3 else ''}. "
+            "Upload files or skip?"
+        )
+        new_state["status"] = "scanning_assets"
+    else:
+        # No missing refs; proceed to agent
+        new_state["status"] = "processing"
+        new_state["pending_question"] = ""
+
+    logger.info(
+        "scan_assets_complete",
+        extra={
+            "session_id": session_id,
+            "found_count": len(found_refs),
+            "missing_count": len(missing_refs),
+            "has_missing": len(missing_refs) > 0,
+        },
+    )
+
+    return new_state
 
 
 def _human_input_node(state: DocumentState) -> DocumentState:

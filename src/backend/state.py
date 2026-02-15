@@ -25,6 +25,20 @@ from typing import Annotated, Literal, TypedDict
 from langchain_core.messages import BaseMessage
 
 
+class ImageRefResult(TypedDict):
+    """Result of scanning a single image reference from markdown.
+
+    Attributes:
+        original_path: Path as it appeared in markdown (before resolution).
+        resolved_path: Absolute resolved path if file exists, or resolved attempt if missing.
+        source_file: Input filename where the reference was found.
+    """
+
+    original_path: str
+    resolved_path: str
+    source_file: str
+
+
 class DocumentState(TypedDict, total=False):
     """State passed through the document generation workflow.
 
@@ -45,6 +59,7 @@ class DocumentState(TypedDict, total=False):
     last_error: str
     error_type: str
     retry_count: int
+    found_image_refs: list[ImageRefResult]
     missing_references: Annotated[list[str], operator.add]
     user_decisions: dict[str, str]
     pending_question: str
@@ -71,10 +86,11 @@ def build_initial_state(session_id: str, input_files: list[str]) -> DocumentStat
     Entry calls this after copying validated files into session inputs/.
     All keys the graph expects are set (no key missing when scan_assets runs).
     Defaults: current_file_index=0, current_chapter=0, conversion_attempts=0,
-    retry_count=0, last_checkpoint_id="", document_outline=[], missing_references=[],
-    user_decisions={}, pending_question="", status="scanning_assets", messages=[],
-    temp_md_path="", structure_json_path="", output_docx_path="", last_error="",
-    error_type="", validation_passed=False, validation_issues=[], generation_complete=False.
+    retry_count=0, last_checkpoint_id="", document_outline=[], found_image_refs=[],
+    missing_references=[], user_decisions={}, pending_question="", status="scanning_assets",
+    messages=[], temp_md_path="", structure_json_path="", output_docx_path="",
+    last_error="", error_type="", validation_passed=False, validation_issues=[],
+    generation_complete=False.
 
     Args:
         session_id: UUID from SessionManager.create().
@@ -97,6 +113,7 @@ def build_initial_state(session_id: str, input_files: list[str]) -> DocumentStat
         "last_error": "",
         "error_type": "",
         "retry_count": 0,
+        "found_image_refs": [],
         "missing_references": [],
         "user_decisions": {},
         "pending_question": "",

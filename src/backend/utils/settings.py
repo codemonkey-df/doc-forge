@@ -91,6 +91,28 @@ class SessionSettings(BaseSettings):
         return v.resolve()
 
 
+class AssetScanSettings(BaseSettings):
+    """Settings for asset scanning (image reference detection).
+
+    Loaded from env with prefix ASSET_.
+    Override via env vars, e.g.:
+      ASSET_ALLOWED_BASE_PATH=/app/allowed_images
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="ASSET_",
+        extra="ignore",
+    )
+
+    allowed_base_path: Path | None = Field(
+        default=None,
+        description="Allowed base directory for absolute image paths. "
+        "If None, no restriction (only URL and relative path checks apply). "
+        "Absolute paths in markdown must be under this directory; "
+        "paths outside are treated as missing.",
+    )
+
+
 class LLMSettings(BaseSettings):
     """Settings for LLM (LiteLLM). Loaded from env: LLM_MODEL, LLM_TEMPERATURE.
 
