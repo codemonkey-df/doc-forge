@@ -471,7 +471,9 @@ def handle_upload_decision(
 
         # Check if path is a directory
         if upload_full_path.is_dir():
-            raise ValueError(f"Upload path must be a file, not directory: {upload_path}")
+            raise ValueError(
+                f"Upload path must be a file, not directory: {upload_path}"
+            )
 
         # Check if path exists and is readable
         if not upload_full_path.exists():

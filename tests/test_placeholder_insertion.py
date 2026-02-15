@@ -6,16 +6,13 @@ plus apply_user_decisions_node(), covering AC3.4.1-3.4.6.
 GIVEN-WHEN-THEN format throughout; security tests marked with @pytest.mark.security.
 """
 
-import re
-import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from backend.state import DocumentState, MissingRefDetail, build_initial_state
+from backend.state import DocumentState, build_initial_state
 from backend.utils.asset_handler import handle_upload_decision, insert_placeholder
-from backend.utils.settings import AssetScanSettings
 
 
 # ============================================================================
@@ -52,15 +49,16 @@ def session_with_temp_output(temp_session_path: Path) -> Path:
     """GIVEN a session with temp_output.md."""
     output_file = temp_session_path / "temp_output.md"
     output_file.write_text(
-        "# Generated\n\n"
-        "![Missing asset](asset.png)\n",
+        "# Generated\n\n![Missing asset](asset.png)\n",
         encoding="utf-8",
     )
     return temp_session_path
 
 
 @pytest.fixture
-def session_with_uploadable_file(temp_session_path: Path, tmp_path: Path) -> tuple[Path, Path]:
+def session_with_uploadable_file(
+    temp_session_path: Path, tmp_path: Path
+) -> tuple[Path, Path]:
     """GIVEN a session and an external file available for upload."""
     # Create an external image file (not in session)
     external_dir = tmp_path / "external"
@@ -76,9 +74,7 @@ def session_with_crlf_file(temp_session_path: Path) -> Path:
     """GIVEN a session with a CRLF line-ending file."""
     input_file = temp_session_path / "inputs" / "crlf_doc.md"
     # Write with explicit CRLF
-    input_file.write_bytes(
-        b"# Title\r\n\r\n![Image](missing.png)\r\n\r\nContent\r\n"
-    )
+    input_file.write_bytes(b"# Title\r\n\r\n![Image](missing.png)\r\n\r\nContent\r\n")
     return temp_session_path
 
 
@@ -117,10 +113,7 @@ class TestInsertPlaceholder:
         # Setup
         input_file = temp_session_path / "inputs" / "multi.md"
         input_file.write_text(
-            "# Doc\n\n"
-            "![Image 1](missing.png)\n\n"
-            "Content\n\n"
-            "![Image 2](missing.png)\n",
+            "# Doc\n\n![Image 1](missing.png)\n\nContent\n\n![Image 2](missing.png)\n",
             encoding="utf-8",
         )
 
@@ -133,12 +126,12 @@ class TestInsertPlaceholder:
         assert content.count("**[Image Missing: missing.png]**") == 2
         assert "![" not in content  # No remaining image refs
 
-    def test_insert_placeholder_temp_output(self, session_with_temp_output: Path) -> None:
+    def test_insert_placeholder_temp_output(
+        self, session_with_temp_output: Path
+    ) -> None:
         """GIVEN temp_output.md with missing ref / WHEN insert_placeholder with target temp_output.md / THEN placeholder in temp_output."""
         # Action
-        insert_placeholder(
-            session_with_temp_output, "asset.png", "temp_output.md"
-        )
+        insert_placeholder(session_with_temp_output, "asset.png", "temp_output.md")
 
         # Assert
         content = (session_with_temp_output / "temp_output.md").read_text(
@@ -308,7 +301,7 @@ class TestHandleUploadDecision:
         handle_upload_decision(
             session_path, str(upload_file), "missing.png", "inputs/doc.md"
         )
-        first_content = input_file.read_text(encoding="utf-8")
+        _ = input_file.read_text(encoding="utf-8")
 
         # Second call (idempotent test: should succeed or overwrite without error)
         handle_upload_decision(
@@ -354,9 +347,9 @@ class TestApplyUserDecisionsNode:
             result = _apply_user_decisions_node(state)
 
         # Assert: placeholder inserted
-        content = (
-            session_with_missing_refs / "inputs" / "doc.md"
-        ).read_text(encoding="utf-8")
+        content = (session_with_missing_refs / "inputs" / "doc.md").read_text(
+            encoding="utf-8"
+        )
         assert "**[Image Missing: missing.png]**" in content
 
         # Assert: state cleared
@@ -396,9 +389,9 @@ class TestApplyUserDecisionsNode:
         assert (session_with_missing_refs / "assets" / "replacement.png").exists()
 
         # Assert: ref updated in input file
-        content = (
-            session_with_missing_refs / "inputs" / "doc.md"
-        ).read_text(encoding="utf-8")
+        content = (session_with_missing_refs / "inputs" / "doc.md").read_text(
+            encoding="utf-8"
+        )
         assert "![Alt text](./assets/replacement.png)" in content
 
         # Assert: state cleared
@@ -421,13 +414,13 @@ class TestApplyUserDecisionsNode:
             mock_sm_class.return_value = mock_sm
 
             # Action
-            result = _apply_user_decisions_node(state)
+            _ = _apply_user_decisions_node(state)
 
         # Assert: no processing occurred
         # Status might still change but no file modifications
-        original_content = (
-            session_with_missing_refs / "inputs" / "doc.md"
-        ).read_text(encoding="utf-8")
+        original_content = (session_with_missing_refs / "inputs" / "doc.md").read_text(
+            encoding="utf-8"
+        )
         assert "![Alt text](missing.png)" in original_content
 
     def test_apply_user_decisions_mixed_skip_upload(
@@ -485,9 +478,7 @@ class TestApplyUserDecisionsNode:
 class TestIntegrationPlaceholderFlow:
     """Integration tests for complete missing image reference flow."""
 
-    def test_scan_to_apply_decisions_skip_flow(
-        self, temp_session_path: Path
-    ) -> None:
+    def test_scan_to_apply_decisions_skip_flow(self, temp_session_path: Path) -> None:
         """GIVEN session with missing image / WHEN scan_assets → human_input → apply_user_decisions / THEN placeholder inserted, agent ready."""
         # Setup
         input_file = temp_session_path / "inputs" / "doc.md"
@@ -606,7 +597,7 @@ class TestIntegrationPlaceholderFlow:
             mock_sm_class.return_value = mock_sm
 
             # Action
-            result = _apply_user_decisions_node(state)
+            _ = _apply_user_decisions_node(state)
 
         # Assert: all decisions applied
         content = input_file.read_text(encoding="utf-8")
@@ -699,19 +690,19 @@ class TestEdgeCases:
         insert_placeholder(temp_session_path, long_id, "inputs/doc.md")
 
         content = input_file.read_text(encoding="utf-8")
-        assert f"**[Image Missing: image_with_very_long_name_12345.png]**" in content
+        assert "**[Image Missing: image_with_very_long_name_12345.png]**" in content
 
     def test_insert_placeholder_crlf_preservation(
         self, session_with_crlf_file: Path
     ) -> None:
         """GIVEN file with CRLF line endings / WHEN insert_placeholder / THEN CRLF preserved."""
         # Read original bytes to check line endings
-        original_bytes = (session_with_crlf_file / "inputs" / "crlf_doc.md").read_bytes()
+        original_bytes = (
+            session_with_crlf_file / "inputs" / "crlf_doc.md"
+        ).read_bytes()
         assert b"\r\n" in original_bytes
 
-        insert_placeholder(
-            session_with_crlf_file, "missing.png", "inputs/crlf_doc.md"
-        )
+        insert_placeholder(session_with_crlf_file, "missing.png", "inputs/crlf_doc.md")
 
         # Check CRLF still present
         modified_bytes = (

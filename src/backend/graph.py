@@ -261,8 +261,7 @@ def _apply_user_decisions_node(
 
     # Build a map of original_path → source_file for quick lookup
     ref_details_map = {
-        detail["original_path"]: detail["source_file"]
-        for detail in missing_ref_details
+        detail["original_path"]: detail["source_file"] for detail in missing_ref_details
     }
 
     # Process each decision
