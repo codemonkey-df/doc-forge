@@ -27,8 +27,7 @@ from backend.state import DocumentState, ValidationIssue
 from backend.tools import get_tools
 from backend.utils.session_manager import SessionManager
 from backend.utils.checkpoint import restore_from_checkpoint
-
-logger = logging.getLogger(__name__)
+from backend.utils.md_to_json_parser import parse_md_to_structure
 
 
 def normalize_markdownlint_issue(raw_issue: dict[str, Any]) -> ValidationIssue:
@@ -286,21 +285,28 @@ def validate_md_node(state: DocumentState) -> DocumentState:
         )
 
 
+logger = logging.getLogger(__name__)
+
+
 def parse_to_json_node(state: DocumentState) -> DocumentState:
-    """Convert temp_output.md to structure.json stub (AC2.5.4).
+    """Convert temp_output.md to structure.json (AC5.2).
 
-    Reads markdown file, parses basic structure (headings, paragraphs, code blocks),
-    writes minimal JSON structure for docx-js converter.
+    Uses parse_md_to_structure to parse markdown with support for:
+    - Headings (H1-H3)
+    - Paragraphs
+    - Fenced code blocks
+    - Tables
+    - Images
 
-    Sets state[structure_json_path] pointing to created structure.json file
-    in session root. This enables the conversion epic (Epic 4) to consume the
-    structured format.
+    Sets state[structure_json_path] on success.
+    On failure: sets conversion_success=False, last_error, does NOT write structure.json.
 
     Args:
         state: DocumentState with session_id and optionally temp_md_path.
 
     Returns:
-        Updated DocumentState with structure_json_path set.
+        Updated DocumentState with structure_json_path set (on success),
+        or conversion_success=False and last_error (on failure).
     """
     session_id = state.get("session_id", "")
     sm = SessionManager()
@@ -312,58 +318,97 @@ def parse_to_json_node(state: DocumentState) -> DocumentState:
 
     structure_json_path = session_path / "structure.json"
 
-    # Read markdown (handle missing file gracefully)
+    # Handle missing file gracefully - create empty structure with defaults
     if not temp_md_file.exists():
         logger.warning(
             "temp_output.md not found at %s, creating empty structure", temp_md_path
         )
-        md_content = ""
-    else:
+        structure = {
+            "metadata": {
+                "title": "Generated Document",
+                "author": "AI Agent",
+                "created": _get_iso_timestamp(),
+            },
+            "sections": [],
+        }
         try:
-            md_content = temp_md_file.read_text(encoding="utf-8")
+            structure_json_path.write_text(
+                json.dumps(structure, indent=2),
+                encoding="utf-8",
+            )
+            logger.info(
+                "parse_completed",
+                extra={
+                    "session_id": session_id,
+                    "section_count": 0,
+                },
+            )
         except Exception as e:
-            logger.error("Failed to read %s: %s", temp_md_path, e)
-            md_content = ""
+            logger.error("Failed to write structure.json: %s", e)
 
-    # Parse markdown into sections
-    sections = _parse_markdown_to_sections(md_content)
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "structure_json_path": str(structure_json_path),
+            },
+        )
 
-    # Build structure JSON (minimal stub for conversion epic)
-    structure = {
-        "metadata": {
-            "title": "Generated Document",
-            "author": "AI Agent",
-            "created": _get_iso_timestamp(),
-        },
-        "sections": sections,
-    }
-
-    # Write structure.json
+    # Parse markdown using the new parser
     try:
+        structure = parse_md_to_structure(temp_md_file, session_path)
+
+        # Write structure.json
         structure_json_path.write_text(
             json.dumps(structure, indent=2),
             encoding="utf-8",
         )
         logger.info(
-            "Created structure.json for session %s with %d sections",
-            session_id,
-            len(sections),
+            "parse_completed",
+            extra={
+                "session_id": session_id,
+                "section_count": len(structure["sections"]),
+            },
+        )
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "structure_json_path": str(structure_json_path),
+            },
+        )
+
+    except UnicodeDecodeError as e:
+        logger.error("Failed to read %s: %s", temp_md_path, e)
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "conversion_success": False,
+                "last_error": f"Parse error: Unicode decode error - {str(e)}",
+            },
+        )
+    except ValueError as e:
+        # Path traversal or other validation error
+        logger.error("Parse validation error for %s: %s", temp_md_path, e)
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "conversion_success": False,
+                "last_error": f"Parse error: {str(e)}",
+            },
         )
     except Exception as e:
-        logger.error(
-            "Failed to write structure.json for session %s: %s",
-            session_id,
-            e,
+        logger.exception("Unexpected error parsing markdown for session %s", session_id)
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "conversion_success": False,
+                "last_error": f"Parse error: {str(e)}",
+            },
         )
-        # Still return state with path, conversion epic can handle missing file
-
-    return cast(
-        DocumentState,
-        {
-            **state,
-            "structure_json_path": str(structure_json_path),
-        },
-    )
 
 
 def _parse_markdown_to_sections(content: str) -> list[dict[str, Any]]:
