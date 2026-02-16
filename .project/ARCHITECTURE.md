@@ -548,7 +548,11 @@ markdownlint temp_output.md --json
 **Input**: `temp_output.md`
 **Output**: `structure.json`
 
-**JSON Schema**:
+**JSON Schema**: The complete JSON schema is defined in `docs/schemas/structure.schema.json`. A human-readable specification is available in `docs/schemas/structure-spec.md`.
+
+**Schema Location**: `docs/schemas/structure.schema.json` (draft-07)
+
+**Image Path Contract**: Image paths in the JSON are session-relative, using the format `./assets/filename.png`. The converter must resolve these relative to the session directory.
 ```json
 {
   "metadata": {

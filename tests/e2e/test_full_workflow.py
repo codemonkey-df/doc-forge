@@ -9,8 +9,6 @@ import uuid
 from pathlib import Path
 
 
-
-
 class TestFullWorkflow:
     """Test complete document generation workflow."""
 

@@ -284,6 +284,7 @@ name = "doc-creator"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "jsonschema" },
     { name = "langchain-core" },
     { name = "langchain-litellm" },
     { name = "langgraph" },
@@ -301,6 +302,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "jsonschema", specifier = ">=4.0" },
     { name = "langchain-core", specifier = ">=1.2.11" },
     { name = "langchain-litellm", specifier = ">=0.5.1" },
     { name = "langgraph", specifier = ">=1.0.8" },

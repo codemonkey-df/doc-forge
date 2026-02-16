@@ -10,7 +10,6 @@ from unittest.mock import MagicMock
 import pytest
 
 
-
 @pytest.fixture
 def temp_session_dir(tmp_path: Path) -> Generator[Path, None, None]:
     """GIVEN temporary session directory with required subdirs."""

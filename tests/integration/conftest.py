@@ -35,6 +35,7 @@ def mock_session_manager(temp_session_dir: Path) -> SessionManager:
 def session_manager_for_integration(temp_session_dir: Path) -> SessionManager:
     """GIVEN a real SessionManager that uses temp directory."""
     sm = SessionManager()
+
     # Override get_path to return our temp directory
     def mock_get_path(session_id: str) -> Path:
         return temp_session_dir
