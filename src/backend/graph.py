@@ -34,6 +34,7 @@ from backend.graph_nodes import (
     convert_with_docxjs_node,
     error_handler_node,
     parse_to_json_node,
+    quality_check_node,
     rollback_node,
     tools_node,
     validate_md_node,
@@ -407,6 +408,7 @@ def create_document_workflow(
     workflow.add_node("error_handler", error_handler_node)
     workflow.add_node("parse_to_json", parse_to_json_node)
     workflow.add_node("convert_docx", convert_with_docxjs_node)
+    workflow.add_node("quality_check", quality_check_node)
 
     # Entry point
     workflow.add_edge(START, "scan_assets")
@@ -520,19 +522,32 @@ def create_document_workflow(
     # Edge: parse_to_json → convert_docx (Story 5.4: convert to DOCX)
     workflow.add_edge("parse_to_json", "convert_docx")
 
-    # Conditional edge: convert_docx → END (Story 5.5: quality_check will be added)
-    # Uses conversion_success to route: success → END, failure → END (fail gracefully)
-    # Note: error_handler not used because conversion failures are not recoverable
+    # Conditional edge: convert_docx → quality_check (Story 5.5: quality check)
+    # Routes to quality_check if conversion succeeded, otherwise to error_handler
     def route_after_conversion(s: DocumentState) -> str:
         """Route after DOCX conversion: check conversion_success."""
         if s.get("conversion_success"):
-            return "end"
-        return "end"  # Fail gracefully - don't loop back through parse_to_json
+            return "quality_check"
+        return "error_handler"
 
     workflow.add_conditional_edges(
         "convert_docx",
         route_after_conversion,
-        {"end": END},
+        {"quality_check": "quality_check", "error_handler": "error_handler"},
+    )
+
+    # Conditional edge: quality_check → END or error_handler
+    # Routes to END if quality passed, otherwise to error_handler
+    def route_after_quality_check(s: DocumentState) -> str:
+        """Route after quality check: check quality_passed."""
+        if s.get("quality_passed"):
+            return "end"
+        return "error_handler"
+
+    workflow.add_conditional_edges(
+        "quality_check",
+        route_after_quality_check,
+        {"end": END, "error_handler": "error_handler"},
     )
 
     # Compile with checkpointer and interrupt_before (Story 2.4)

@@ -28,6 +28,7 @@ from backend.tools import get_tools
 from backend.utils.session_manager import SessionManager
 from backend.utils.checkpoint import restore_from_checkpoint
 from backend.utils.md_to_json_parser import parse_md_to_structure
+from backend.utils.quality_validator import QualityValidator
 
 
 def normalize_markdownlint_issue(raw_issue: dict[str, Any]) -> ValidationIssue:
@@ -894,5 +895,92 @@ def convert_with_docxjs_node(state: DocumentState) -> DocumentState:
                 "last_error": error_msg,
                 "status": "error_handling",
                 "conversion_attempts": current_attempts + 1,
+            },
+        )
+
+
+def quality_check_node(state: DocumentState) -> DocumentState:
+    """Validate generated DOCX quality (Story 5.5).
+
+    Loads the generated DOCX file and validates against FC011 criteria:
+    - Heading hierarchy (no skipped levels)
+    - Image rendering (no broken images)
+    - Code block formatting (monospace fonts)
+    - Table structure (consistent column counts)
+
+    Args:
+        state: DocumentState with session_id and output_docx_path
+
+    Returns:
+        Updated state with quality_passed, quality_issues, and status:
+        - "complete" if quality passes
+        - "error_handling" if quality fails
+    """
+    session_id = state.get("session_id", "")
+    output_docx_path = state.get("output_docx_path", "")
+
+    # Handle missing DOCX path
+    if not output_docx_path:
+        logger.warning(
+            "quality_check_skipped",
+            extra={
+                "session_id": session_id,
+                "reason": "No DOCX output to validate",
+            },
+        )
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "quality_passed": False,
+                "quality_issues": ["No DOCX output to validate"],
+                "last_error": "No DOCX output to validate",
+                "status": "error_handling",
+            },
+        )
+
+    # Validate the DOCX
+    validator = QualityValidator()
+    result = validator.validate(Path(output_docx_path))
+
+    quality_passed = result.get("passed", False)
+    quality_issues = result.get("issues", [])
+
+    # Log quality check results
+    logger.info(
+        "quality_check_completed",
+        extra={
+            "session_id": session_id,
+            "passed": quality_passed,
+            "issue_count": len(quality_issues),
+            "issues": quality_issues,
+            "score": result.get("score", 0),
+        },
+    )
+
+    # Set status based on result
+    if quality_passed:
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "quality_passed": True,
+                "quality_issues": quality_issues,
+                "status": "complete",
+            },
+        )
+    else:
+        # Summarize issues for last_error
+        issue_summary = "; ".join(quality_issues[:3])
+        if len(quality_issues) > 3:
+            issue_summary += f" (+{len(quality_issues) - 3} more)"
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "quality_passed": False,
+                "quality_issues": quality_issues,
+                "last_error": f"Quality check failed: {issue_summary}",
+                "status": "error_handling",
             },
         )
