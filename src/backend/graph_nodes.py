@@ -27,8 +27,8 @@ from backend.state import DocumentState, ValidationIssue
 from backend.tools import get_tools
 from backend.utils.session_manager import SessionManager
 from backend.utils.checkpoint import restore_from_checkpoint
-
-logger = logging.getLogger(__name__)
+from backend.utils.md_to_json_parser import parse_md_to_structure
+from backend.utils.quality_validator import QualityValidator
 
 
 def normalize_markdownlint_issue(raw_issue: dict[str, Any]) -> ValidationIssue:
@@ -286,21 +286,28 @@ def validate_md_node(state: DocumentState) -> DocumentState:
         )
 
 
+logger = logging.getLogger(__name__)
+
+
 def parse_to_json_node(state: DocumentState) -> DocumentState:
-    """Convert temp_output.md to structure.json stub (AC2.5.4).
+    """Convert temp_output.md to structure.json (AC5.2).
 
-    Reads markdown file, parses basic structure (headings, paragraphs, code blocks),
-    writes minimal JSON structure for docx-js converter.
+    Uses parse_md_to_structure to parse markdown with support for:
+    - Headings (H1-H3)
+    - Paragraphs
+    - Fenced code blocks
+    - Tables
+    - Images
 
-    Sets state[structure_json_path] pointing to created structure.json file
-    in session root. This enables the conversion epic (Epic 4) to consume the
-    structured format.
+    Sets state[structure_json_path] on success.
+    On failure: sets conversion_success=False, last_error, does NOT write structure.json.
 
     Args:
         state: DocumentState with session_id and optionally temp_md_path.
 
     Returns:
-        Updated DocumentState with structure_json_path set.
+        Updated DocumentState with structure_json_path set (on success),
+        or conversion_success=False and last_error (on failure).
     """
     session_id = state.get("session_id", "")
     sm = SessionManager()
@@ -312,140 +319,97 @@ def parse_to_json_node(state: DocumentState) -> DocumentState:
 
     structure_json_path = session_path / "structure.json"
 
-    # Read markdown (handle missing file gracefully)
+    # Handle missing file gracefully - create empty structure with defaults
     if not temp_md_file.exists():
         logger.warning(
             "temp_output.md not found at %s, creating empty structure", temp_md_path
         )
-        md_content = ""
-    else:
+        structure = {
+            "metadata": {
+                "title": "Generated Document",
+                "author": "AI Agent",
+                "created": _get_iso_timestamp(),
+            },
+            "sections": [],
+        }
         try:
-            md_content = temp_md_file.read_text(encoding="utf-8")
+            structure_json_path.write_text(
+                json.dumps(structure, indent=2),
+                encoding="utf-8",
+            )
+            logger.info(
+                "parse_completed",
+                extra={
+                    "session_id": session_id,
+                    "section_count": 0,
+                },
+            )
         except Exception as e:
-            logger.error("Failed to read %s: %s", temp_md_path, e)
-            md_content = ""
+            logger.error("Failed to write structure.json: %s", e)
 
-    # Parse markdown into sections
-    sections = _parse_markdown_to_sections(md_content)
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "structure_json_path": str(structure_json_path),
+            },
+        )
 
-    # Build structure JSON (minimal stub for conversion epic)
-    structure = {
-        "metadata": {
-            "title": "Generated Document",
-            "author": "AI Agent",
-            "created": _get_iso_timestamp(),
-        },
-        "sections": sections,
-    }
-
-    # Write structure.json
+    # Parse markdown using the new parser
     try:
+        structure = parse_md_to_structure(temp_md_file, session_path)
+
+        # Write structure.json
         structure_json_path.write_text(
             json.dumps(structure, indent=2),
             encoding="utf-8",
         )
         logger.info(
-            "Created structure.json for session %s with %d sections",
-            session_id,
-            len(sections),
+            "parse_completed",
+            extra={
+                "session_id": session_id,
+                "section_count": len(structure["sections"]),
+            },
+        )
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "structure_json_path": str(structure_json_path),
+            },
+        )
+
+    except UnicodeDecodeError as e:
+        logger.error("Failed to read %s: %s", temp_md_path, e)
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "conversion_success": False,
+                "last_error": f"Parse error: Unicode decode error - {str(e)}",
+            },
+        )
+    except ValueError as e:
+        # Path traversal or other validation error
+        logger.error("Parse validation error for %s: %s", temp_md_path, e)
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "conversion_success": False,
+                "last_error": f"Parse error: {str(e)}",
+            },
         )
     except Exception as e:
-        logger.error(
-            "Failed to write structure.json for session %s: %s",
-            session_id,
-            e,
+        logger.exception("Unexpected error parsing markdown for session %s", session_id)
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "conversion_success": False,
+                "last_error": f"Parse error: {str(e)}",
+            },
         )
-        # Still return state with path, conversion epic can handle missing file
-
-    return cast(
-        DocumentState,
-        {
-            **state,
-            "structure_json_path": str(structure_json_path),
-        },
-    )
-
-
-def _parse_markdown_to_sections(content: str) -> list[dict[str, Any]]:
-    """Parse markdown content into sections (headings, paragraphs, code blocks).
-
-    Simple regex-based parsing to extract:
-    - Headings (# → ###) → heading1/heading2/heading3
-    - Code blocks (```language ... ```) → code_block
-    - Paragraphs → paragraph
-
-    Returns list of section dicts compatible with structure.json schema.
-    """
-    sections: list[dict[str, Any]] = []
-
-    if not content.strip():
-        return sections
-
-    lines = content.split("\n")
-    i = 0
-
-    while i < len(lines):
-        line = lines[i]
-
-        # Parse heading
-        if line.startswith("#"):
-            level = len(line.split()[0])  # Count # chars
-            if 1 <= level <= 3:
-                text = line[level:].strip()
-                sections.append(
-                    {
-                        "type": f"heading{level}",
-                        "text": text,
-                    }
-                )
-            i += 1
-            continue
-
-        # Parse code block
-        if line.strip().startswith("```"):
-            language = line[3:].strip() or "text"
-            code_lines = []
-            i += 1
-            while i < len(lines) and not lines[i].strip().startswith("```"):
-                code_lines.append(lines[i])
-                i += 1
-            if i < len(lines):
-                i += 1  # Skip closing ```
-
-            code_content = "\n".join(code_lines).rstrip()
-            if code_content:  # Only add if non-empty
-                sections.append(
-                    {
-                        "type": "code_block",
-                        "language": language,
-                        "code": code_content,
-                    }
-                )
-            continue
-
-        # Skip empty lines
-        if not line.strip():
-            i += 1
-            continue
-
-        # Parse paragraph
-        para_lines = []
-        while i < len(lines) and lines[i].strip():
-            if lines[i].startswith("#") or lines[i].strip().startswith("```"):
-                break
-            para_lines.append(lines[i])
-            i += 1
-
-        para_text = " ".join([line.strip() for line in para_lines]).strip()
-        if para_text:
-            sections.append(
-                {
-                    "type": "paragraph",
-                    "text": para_text,
-                }
-            )
-
-    return sections
 
 
 def _get_iso_timestamp() -> str:
@@ -729,3 +693,294 @@ def rollback_node(state: DocumentState) -> DocumentState:
             },
         )
         return cast(DocumentState, {**state})
+
+
+def convert_with_docxjs_node(state: DocumentState) -> DocumentState:
+    """Convert structure.json to output.docx using Node.js converter.js (Story 5.4).
+
+    Executes the converter.js script with structure.json as input and writes
+    output.docx. Uses 120s timeout by default (configurable via CONVERSION_TIMEOUT_SECONDS).
+
+    Short-circuits on missing inputs (structure.json, Node.js, converter.js).
+    Increments conversion_attempts on every run.
+
+    Args:
+        state: DocumentState with session_id, optionally structure_json_path
+
+    Returns:
+        Updated DocumentState with:
+        - conversion_success: True if conversion completed, False otherwise
+        - output_docx_path: Set on success
+        - last_error: Set on failure
+        - status: "quality_checking" on success, "error_handling" on failure
+        - conversion_attempts: Incremented
+    """
+    import os
+    import shutil
+
+    session_id = state.get("session_id", "")
+    sm = SessionManager()
+    session_path = sm.get_path(session_id)
+
+    # Get structure.json path from state or derive
+    structure_json_path = state.get("structure_json_path") or str(
+        session_path / "structure.json"
+    )
+    structure_json_file = Path(structure_json_path)
+
+    # Prepare output path
+    output_docx_path = state.get("output_docx_path") or str(
+        session_path / "output.docx"
+    )
+
+    # Increment conversion_attempts
+    current_attempts = state.get("conversion_attempts", 0)
+
+    # Step 1: Short-circuit if structure.json missing
+    if not structure_json_file.exists():
+        logger.warning(
+            "conversion_failed_no_json",
+            extra={
+                "session_id": session_id,
+                "attempt": current_attempts + 1,
+                "reason": "No structure.json",
+            },
+        )
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "conversion_success": False,
+                "last_error": "No structure.json",
+                "status": "error_handling",
+                "conversion_attempts": current_attempts + 1,
+            },
+        )
+
+    # Step 2: Resolve Node executable
+    node_exe = os.environ.get("NODE_PATH") or shutil.which("node")
+    if not node_exe:
+        logger.warning(
+            "conversion_failed_no_node",
+            extra={
+                "session_id": session_id,
+                "attempt": current_attempts + 1,
+            },
+        )
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "conversion_success": False,
+                "last_error": "Node.js not found",
+                "status": "error_handling",
+                "conversion_attempts": current_attempts + 1,
+            },
+        )
+
+    # Step 3: Resolve converter.js path
+    converter_js_path = os.environ.get("CONVERTER_JS_PATH")
+    if converter_js_path:
+        converter_script = Path(converter_js_path)
+        if not converter_script.is_absolute():
+            # Resolve relative to project root (assuming project root is parent of src/backend)
+            project_root = Path(__file__).parent.parent.parent
+            converter_script = project_root / converter_js_path
+    else:
+        # Default: ./src/node/converter.js relative to project root
+        project_root = Path(__file__).parent.parent.parent
+        converter_script = project_root / "src" / "node" / "converter.js"
+
+    if not converter_script.exists():
+        logger.warning(
+            "conversion_failed_no_converter",
+            extra={
+                "session_id": session_id,
+                "attempt": current_attempts + 1,
+                "converter_path": str(converter_script),
+            },
+        )
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "conversion_success": False,
+                "last_error": "converter.js not found",
+                "status": "error_handling",
+                "conversion_attempts": current_attempts + 1,
+            },
+        )
+
+    # Get timeout from env or default to 120s
+    timeout_seconds = int(os.environ.get("CONVERSION_TIMEOUT_SECONDS", "120"))
+
+    logger.info(
+        "conversion_started",
+        extra={
+            "session_id": session_id,
+            "attempt": current_attempts + 1,
+            "json_path": str(structure_json_file),
+            "docx_path": output_docx_path,
+            "timeout": timeout_seconds,
+        },
+    )
+
+    # Step 4: Execute Node script
+    try:
+        result = subprocess.run(
+            [
+                node_exe,
+                str(converter_script),
+                str(structure_json_file),
+                output_docx_path,
+            ],
+            cwd=str(session_path),
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        logger.error(
+            "conversion_timeout",
+            extra={
+                "session_id": session_id,
+                "timeout": timeout_seconds,
+            },
+        )
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "conversion_success": False,
+                "last_error": f"Conversion timeout ({timeout_seconds}s exceeded)",
+                "status": "error_handling",
+                "conversion_attempts": current_attempts + 1,
+            },
+        )
+
+    # Step 5: Handle results
+    if result.returncode == 0:
+        logger.info(
+            "conversion_success",
+            extra={
+                "session_id": session_id,
+                "output_docx_path": output_docx_path,
+            },
+        )
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "conversion_success": True,
+                "output_docx_path": output_docx_path,
+                "status": "quality_checking",
+                "conversion_attempts": current_attempts + 1,
+            },
+        )
+    else:
+        # Non-zero exit: use stderr, fallback to stdout
+        error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+        logger.warning(
+            "conversion_failed",
+            extra={
+                "session_id": session_id,
+                "error": error_msg[:200],
+            },
+        )
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "conversion_success": False,
+                "last_error": error_msg,
+                "status": "error_handling",
+                "conversion_attempts": current_attempts + 1,
+            },
+        )
+
+
+def quality_check_node(state: DocumentState) -> DocumentState:
+    """Validate generated DOCX quality (Story 5.5).
+
+    Loads the generated DOCX file and validates against FC011 criteria:
+    - Heading hierarchy (no skipped levels)
+    - Image rendering (no broken images)
+    - Code block formatting (monospace fonts)
+    - Table structure (consistent column counts)
+
+    Args:
+        state: DocumentState with session_id and output_docx_path
+
+    Returns:
+        Updated state with quality_passed, quality_issues, and status:
+        - "complete" if quality passes
+        - "error_handling" if quality fails
+    """
+    session_id = state.get("session_id", "")
+    output_docx_path = state.get("output_docx_path", "")
+
+    # Handle missing DOCX path
+    if not output_docx_path:
+        logger.warning(
+            "quality_check_skipped",
+            extra={
+                "session_id": session_id,
+                "reason": "No DOCX output to validate",
+            },
+        )
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "quality_passed": False,
+                "quality_issues": ["No DOCX output to validate"],
+                "last_error": "No DOCX output to validate",
+                "status": "error_handling",
+            },
+        )
+
+    # Validate the DOCX
+    validator = QualityValidator()
+    result = validator.validate(Path(output_docx_path))
+
+    quality_passed = result.get("passed", False)
+    quality_issues = result.get("issues", [])
+
+    # Log quality check results
+    logger.info(
+        "quality_check_completed",
+        extra={
+            "session_id": session_id,
+            "passed": quality_passed,
+            "issue_count": len(quality_issues),
+            "issues": quality_issues,
+            "score": result.get("score", 0),
+        },
+    )
+
+    # Set status based on result
+    if quality_passed:
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "quality_passed": True,
+                "quality_issues": quality_issues,
+                "status": "complete",
+            },
+        )
+    else:
+        # Summarize issues for last_error
+        issue_summary = "; ".join(quality_issues[:3])
+        if len(quality_issues) > 3:
+            issue_summary += f" (+{len(quality_issues) - 3} more)"
+        return cast(
+            DocumentState,
+            {
+                **state,
+                "quality_passed": False,
+                "quality_issues": quality_issues,
+                "last_error": f"Quality check failed: {issue_summary}",
+                "status": "error_handling",
+            },
+        )
