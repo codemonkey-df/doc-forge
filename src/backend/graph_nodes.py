@@ -1105,13 +1105,14 @@ def save_results_node(state: DocumentState) -> DocumentState:
     Story 6.4 DoD - Handles both success and failure paths:
 
     Failure branch: (retry_count >= MAX_RETRY_ATTEMPTS) or (status == "failed")
-      - Write FAILED_conversion.md with error summary
-      - Write ERROR_REPORT.txt with full error details
+      - Copy temp_output.md to FAILED_conversion.md (or create placeholder if missing)
+      - Write ERROR_REPORT.txt with full error details (last_error truncated to 1000 chars)
       - Set status="failed"
 
     Success branch: conversion succeeded and passed quality check
       - Archive session (cleanup temp files, mark complete)
       - Set status="complete"
+      - Set output_docx_path to archive location
 
     Always routes to END.
 
@@ -1121,6 +1122,7 @@ def save_results_node(state: DocumentState) -> DocumentState:
     Returns:
         Updated state with status="complete" or status="failed"
     """
+    import shutil
     from datetime import datetime
     from backend.routing import MAX_RETRY_ATTEMPTS
     from backend.utils.session_manager import SessionManager
@@ -1138,11 +1140,27 @@ def save_results_node(state: DocumentState) -> DocumentState:
 
     if is_failure:
         # Failure path: write error files
-        error_msg = last_error or "Unknown error"
+        # Truncate last_error to 1000 chars
+        truncated_error = last_error[:1000] if last_error else "Unknown error"
 
-        # Write FAILED_conversion.md
+        # Copy temp_output.md to FAILED_conversion.md if it exists
         failed_md_path = session_path / "FAILED_conversion.md"
-        failed_content = f"""# Conversion Failed
+        temp_output_path = session_path / "temp_output.md"
+
+        if temp_output_path.exists():
+            try:
+                shutil.copy2(temp_output_path, failed_md_path)
+                logger.info(
+                    "failure_report_copied_from_temp",
+                    extra={
+                        "session_id": session_id,
+                        "source": str(temp_output_path),
+                        "destination": str(failed_md_path),
+                    },
+                )
+            except Exception:
+                # Fallback to generated content
+                failed_content = f"""# Conversion Failed
 
 **Session ID**: {session_id}
 **Timestamp**: {datetime.now().isoformat()}
@@ -1150,7 +1168,7 @@ def save_results_node(state: DocumentState) -> DocumentState:
 
 ## Error Summary
 
-{error_msg[:500]}
+{truncated_error}
 
 ## Details
 
@@ -1158,21 +1176,38 @@ def save_results_node(state: DocumentState) -> DocumentState:
 - Error Type: {state.get("error_type", "unknown")}
 - Handler Outcome: {str(state.get("handler_outcome", "N/A"))[:200]}
 """
-        try:
+                failed_md_path.write_text(failed_content, encoding="utf-8")
+        else:
+            # Create placeholder FAILED_conversion.md
+            failed_content = f"""# Conversion Failed
+
+**Session ID**: {session_id}
+**Timestamp**: {datetime.now().isoformat()}
+**Retry Count**: {retry_count}/{MAX_RETRY_ATTEMPTS}
+
+## Error Summary
+
+{truncated_error}
+
+## Details
+
+- Status: {current_status}
+- Error Type: {state.get("error_type", "unknown")}
+- Handler Outcome: {str(state.get("handler_outcome", "N/A"))[:200]}
+
+## Note
+
+No intermediate output file was available for review.
+"""
             failed_md_path.write_text(failed_content, encoding="utf-8")
-            logger.info(
-                "failure_report_written",
-                extra={
-                    "session_id": session_id,
-                    "path": str(failed_md_path),
-                },
-            )
-        except Exception as e:
-            logger.error(
-                "Failed to write FAILED_conversion.md: %s",
-                e,
-                exc_info=True,
-            )
+
+        logger.info(
+            "failure_report_written",
+            extra={
+                "session_id": session_id,
+                "path": str(failed_md_path),
+            },
+        )
 
         # Write ERROR_REPORT.txt
         error_report_path = session_path / "ERROR_REPORT.txt"
@@ -1187,7 +1222,7 @@ Error Type: {state.get("error_type", "unknown")}
 
 Error Message:
 --------------
-{error_msg}
+{truncated_error}
 
 Handler Outcome:
 ----------------
@@ -1199,6 +1234,15 @@ conversion_success: {state.get("conversion_success", False)}
 quality_passed: {state.get("quality_passed", False)}
 validation_passed: {state.get("validation_passed", False)}
 generation_complete: {state.get("generation_complete", False)}
+
+Guidance:
+---------
+- Check the error message above for the root cause
+- Review FAILED_conversion.md for the document state at time of failure
+- Ensure all referenced assets (images, files) exist and paths are correct
+- Verify document structure follows expected heading hierarchy
+- If retry attempts were made, each retry may have modified the document
+- Consider running with debug logging for more detailed error information
 """
         try:
             error_report_path.write_text(error_report_content, encoding="utf-8")
@@ -1217,11 +1261,12 @@ generation_complete: {state.get("generation_complete", False)}
             )
 
         logger.info(
-            "save_results_failure",
+            "session_failed",
             extra={
                 "session_id": session_id,
                 "retry_count": retry_count,
                 "max_retries": MAX_RETRY_ATTEMPTS,
+                "error_type": state.get("error_type", "unknown"),
             },
         )
 
@@ -1234,10 +1279,21 @@ generation_complete: {state.get("generation_complete", False)}
         )
     else:
         # Success path: archive session (mark complete)
+        # Get docs_base_path and archive_dir from SessionManager settings
+        docs_base_path = sm._settings.docs_base_path
+        archive_dir = sm._settings.archive_dir
+
+        # Archive the session
+        sm.cleanup(session_id, archive=True)
+
+        # Set output_docx_path to archive location
+        archive_output_path = docs_base_path / archive_dir / session_id / "output.docx"
+
         logger.info(
-            "save_results_success",
+            "session_completed",
             extra={
                 "session_id": session_id,
+                "output_docx_path": str(archive_output_path),
             },
         )
 
@@ -1246,5 +1302,6 @@ generation_complete: {state.get("generation_complete", False)}
             {
                 **state,
                 "status": "complete",
+                "output_docx_path": str(archive_output_path),
             },
         )
