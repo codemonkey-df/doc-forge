@@ -1,6 +1,6 @@
 """Tests for TUI panels."""
 
-from src.tui.state import AppState
+from src.tui.state import AppState, ChapterEntry
 from src.tui.panels import render_sources, render_outline, render_log
 
 
@@ -41,7 +41,7 @@ class TestRenderSources:
         """Used chapter files should be marked with checkmark."""
         state = AppState(
             detected_files=["intro.md", "chapter1.md", "chapter2.md"],
-            chapters=["chapter1.md"],
+            chapters=[ChapterEntry("chapter1.md")],
         )
         panel = render_sources(state)
         content = str(panel.renderable)
@@ -94,7 +94,9 @@ class TestRenderOutline:
 
     def test_shows_chapter_list(self):
         """Should show list of chapters when set."""
-        state = AppState(chapters=["chapter1.md", "chapter2.md"])
+        state = AppState(
+            chapters=[ChapterEntry("chapter1.md"), ChapterEntry("chapter2.md")]
+        )
         panel = render_outline(state)
         content = str(panel.renderable)
         assert "chapter1.md" in content

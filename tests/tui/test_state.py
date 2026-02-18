@@ -1,6 +1,5 @@
 """Tests for src/tui/state.py module."""
 
-
 from src.tui.state import AppState, ChapterEntry
 
 
