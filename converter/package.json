@@ -1,0 +1,13 @@
+{
+  "name": "docx-converter",
+  "version": "1.0.0",
+  "description": "DOCX converter for markdown documents",
+  "main": "index.js",
+  "scripts": {
+    "test": "node md_parser.test.js"
+  },
+  "dependencies": {
+    "docx": "^8.0.0",
+    "minimist": "^1.2.8"
+  }
+}
