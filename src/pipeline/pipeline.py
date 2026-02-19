@@ -4,9 +4,9 @@ import logging
 import re
 import threading
 from pathlib import Path
-from typing import Any
 
 from src.llm.generator import ResolvedContext, generate_content
+from src.llm.healer import heal_markdown, needs_healing
 from src.scanner.ref_scanner import Ref, scan_files
 from src.tui.state import AppState
 
@@ -145,6 +145,11 @@ def run_pipeline(state: AppState) -> None:
         # Stage 4: Generate content
         state.log_lines.append("Generating content...")
         markdown = generate_content(state, resolved)
+
+        # Stage 4b: Self-heal (after generate_content)
+        if needs_healing(markdown):
+            state.log_lines.append("Self-healing markdown...")
+            markdown = heal_markdown(markdown)
 
         # Stage 5: Write output
         state.log_lines.append("Writing output...")

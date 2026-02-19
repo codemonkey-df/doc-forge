@@ -40,7 +40,9 @@ class TestValidateConfig:
 
     def test_empty_title_raises_error(self):
         """Empty title raises PipelineError."""
-        state = AppState(title="", intro_file="intro.md", chapters=[ChapterEntry("ch1.md")])
+        state = AppState(
+            title="", intro_file="intro.md", chapters=[ChapterEntry("ch1.md")]
+        )
         with pytest.raises(PipelineError) as exc:
             validate_config(state)
         assert exc.value.stage == "validate"
@@ -48,14 +50,18 @@ class TestValidateConfig:
 
     def test_untitled_raises_error(self):
         """Title 'Untitled' raises PipelineError."""
-        state = AppState(title="Untitled", intro_file="intro.md", chapters=[ChapterEntry("ch1.md")])
+        state = AppState(
+            title="Untitled", intro_file="intro.md", chapters=[ChapterEntry("ch1.md")]
+        )
         with pytest.raises(PipelineError) as exc:
             validate_config(state)
         assert "Document title required" in exc.value.message
 
     def test_no_intro_raises_error(self):
         """Missing intro file raises PipelineError."""
-        state = AppState(title="My Doc", intro_file=None, chapters=[ChapterEntry("ch1.md")])
+        state = AppState(
+            title="My Doc", intro_file=None, chapters=[ChapterEntry("ch1.md")]
+        )
         with pytest.raises(PipelineError) as exc:
             validate_config(state)
         assert exc.value.stage == "validate"
@@ -71,7 +77,9 @@ class TestValidateConfig:
 
     def test_valid_config_passes(self):
         """Valid config passes validation."""
-        state = AppState(title="My Doc", intro_file="intro.md", chapters=[ChapterEntry("ch1.md")])
+        state = AppState(
+            title="My Doc", intro_file="intro.md", chapters=[ChapterEntry("ch1.md")]
+        )
         # Should not raise
         validate_config(state)
 
@@ -189,7 +197,9 @@ class TestRunPipeline:
         state = AppState(title="", intro_file=None, chapters=[])
         run_pipeline(state)
         assert any("Starting pipeline" in line for line in state.log_lines)
-        assert any("Error" in line and "title required" in line for line in state.log_lines)
+        assert any(
+            "Error" in line and "title required" in line for line in state.log_lines
+        )
 
     def test_successful_pipeline(self):
         """Successful pipeline logs all stages."""

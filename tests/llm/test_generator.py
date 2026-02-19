@@ -52,7 +52,10 @@ class TestGenerateContent:
         state = AppState(
             title="Test Document",
             intro_file=None,
-            chapters=[ChapterEntry(file_path="ch1.md"), ChapterEntry(file_path="ch2.md")],
+            chapters=[
+                ChapterEntry(file_path="ch1.md"),
+                ChapterEntry(file_path="ch2.md"),
+            ],
         )
         resolved = ResolvedContext()
 
