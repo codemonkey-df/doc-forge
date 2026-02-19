@@ -256,9 +256,10 @@ function createStyles() {
  * Build the document from parsed blocks
  * @param {Object[]} blocks - Array of block objects
  * @param {string} title - Document title
+ * @param {string} tocMarkdown - Raw TOC markdown content (optional, for extraction)
  * @returns {Document} docx Document
  */
-function buildDocument(blocks, title) {
+function buildDocument(blocks, title, tocMarkdown = null) {
   const children = [];
 
   // Section 1 - Title Page
@@ -277,22 +278,54 @@ function buildDocument(blocks, title) {
   children.push(new Paragraph({ children: [new PageBreak()] }));
 
   // Section 2 - TOC Page
+  // Instead of using Word's auto-TOC, render the markdown TOC as static content
   children.push(
     new Paragraph({
       heading: HeadingLevel.HEADING_1,
       children: [new TextRun({ text: 'Table of Contents', bold: true })]
     })
   );
-  children.push(
-    new TableOfContents('TOC', {
-      heading1Range: '1-3',
-      stylesWithLevels: [
-        { name: 'Heading1', styleId: 'Heading1' },
-        { name: 'Heading2', styleId: 'Heading2' },
-        { name: 'Heading3', styleId: 'Heading3' }
-      ]
-    })
-  );
+
+  // If we have TOC markdown, parse and render it as paragraphs
+  if (tocMarkdown) {
+    const tocLines = tocMarkdown.split('\n');
+    for (const line of tocLines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      // Check indentation level for hierarchy
+      const indentMatch = trimmed.match(/^(\s*)[-*]\s+(.+)$/);
+      if (indentMatch) {
+        const indent = indentMatch[1].length;
+        const text = indentMatch[2];
+
+        children.push(
+          new Paragraph({
+            text: text,
+            indent: {
+              left: 720 + (indent * 360) // Base indent + additional per level
+            },
+            spacing: {
+              after: 60
+            }
+          })
+        );
+      } else if (trimmed.startsWith('#')) {
+        // Skip markdown headings in TOC content
+        continue;
+      } else {
+        // Plain text line
+        children.push(
+          new Paragraph({
+            text: trimmed,
+            spacing: {
+              after: 60
+            }
+          })
+        );
+      }
+    }
+  }
   children.push(new Paragraph({ children: [new PageBreak()] }));
 
   // Define numbering for numbered lists
@@ -377,11 +410,18 @@ function main() {
 
   const markdownContent = fs.readFileSync(inputPath, 'utf-8');
 
+  // Extract TOC from markdown (between "Table of Contents" heading and next heading)
+  let tocMarkdown = null;
+  const tocMatch = markdownContent.match(/##?\s*Table of Contents\s*\n+([\s\S]*?)(?=\n##?\s+|$)/i);
+  if (tocMatch) {
+    tocMarkdown = tocMatch[1].trim();
+  }
+
   // Parse markdown
   const blocks = parseMarkdown(markdownContent);
 
   // Build document
-  const document = buildDocument(blocks, title);
+  const document = buildDocument(blocks, title, tocMarkdown);
 
   // Write output file
   Packer.toBuffer(document).then(buffer => {
