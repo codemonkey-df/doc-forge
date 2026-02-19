@@ -1,0 +1,217 @@
+"""Tests for the content generator module."""
+
+from unittest.mock import patch
+
+import pytest
+
+from src.llm.generator import (
+    ResolvedContext,
+    generate_content,
+    read_file,
+)
+from src.tui.state import AppState, ChapterEntry
+
+
+class TestReadFile:
+    """Tests for the read_file helper function."""
+
+    def test_read_file_returns_content(self, tmp_path):
+        """Test that read_file returns file content."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Hello, world!", encoding="utf-8")
+
+        result = read_file(str(test_file))
+        assert result == "Hello, world!"
+
+    def test_read_file_returns_empty_for_none(self):
+        """Test that read_file returns empty string for None."""
+        result = read_file(None)
+        assert result == ""
+
+    def test_read_file_returns_empty_for_nonexistent(self, tmp_path):
+        """Test that read_file returns empty string for nonexistent path."""
+        # Create parent directory but not the file
+        test_dir = tmp_path / "nonexistent"
+        test_dir.mkdir()
+        result = read_file(str(test_dir / "file.txt"))
+        assert result == ""
+
+
+class TestGenerateContent:
+    """Tests for the generate_content function."""
+
+    @pytest.fixture
+    def mock_call_llm(self):
+        """Fixture to mock call_llm."""
+        with patch("src.llm.generator.call_llm") as mock:
+            mock.return_value = "Mocked content"
+            yield mock
+
+    def test_assembly_order_correct(self, mock_call_llm):
+        """Test that final output has correct assembly order."""
+        state = AppState(
+            title="Test Document",
+            intro_file=None,
+            chapters=[
+                ChapterEntry(file_path="ch1.md"),
+                ChapterEntry(file_path="ch2.md"),
+            ],
+        )
+        resolved = ResolvedContext()
+
+        with patch("src.llm.generator.read_file", return_value=""):
+            result = generate_content(state, resolved)
+
+        # Check title block at start
+        assert result.startswith("# Test Document\n\n---")
+
+        # Check TOC comes after title block
+        assert "Mocked content" in result  # TOC is first LLM call
+
+        # Check intro comes after TOC
+        toc_pos = result.index("Mocked content")
+        intro_pos = result.find("Mocked content", toc_pos + 1)
+        assert intro_pos > toc_pos
+
+    def test_to_summarize_injected_into_correct_chapter(self, mock_call_llm):
+        """Test that to_summarize content is injected into correct chapter."""
+        state = AppState(
+            title="Test Document",
+            intro_file=None,
+            chapters=[
+                ChapterEntry(file_path="ch1.md"),
+                ChapterEntry(file_path="ch2.md"),  # This is the one with extra context
+            ],
+        )
+        resolved = ResolvedContext(
+            to_summarize=[("ch2.md", "Extra summary content for chapter 2")],
+        )
+
+        with patch("src.llm.generator.read_file") as mock_read:
+            # Return different content for each chapter
+            def read_side_effect(path):
+                if path == "ch1.md":
+                    return "Chapter 1 content"
+                elif path == "ch2.md":
+                    return "Chapter 2 content"
+                return ""
+
+            mock_read.side_effect = read_side_effect
+
+            generate_content(state, resolved)
+
+            # Check that call_llm was called with the extra context for ch2
+            calls = mock_call_llm.call_args_list
+
+            # First call is intro (empty content)
+            # Second call is ch1 (no extra context)
+            # Third call is ch2 (should have extra context)
+            third_call_args = calls[2]
+            user_prompt = third_call_args[0][1]  # Second positional arg is user prompt
+
+            assert "Additional context to consider:" in user_prompt
+            assert "Extra summary content for chapter 2" in user_prompt
+
+    def test_title_block_format(self, mock_call_llm):
+        """Test that title block is formatted correctly."""
+        state = AppState(
+            title="My Document",
+            intro_file=None,
+            chapters=[],
+        )
+        resolved = ResolvedContext()
+
+        result = generate_content(state, resolved)
+
+        assert result.startswith("# My Document\n\n---")
+
+    def test_toc_section_present(self, mock_call_llm):
+        """Test that TOC section is present in output."""
+        state = AppState(
+            title="Test Document",
+            intro_file=None,
+            chapters=[
+                ChapterEntry(file_path="ch1.md", custom_title="First Chapter"),
+                ChapterEntry(file_path="ch2.md", custom_title="Second Chapter"),
+            ],
+        )
+        resolved = ResolvedContext()
+
+        with patch("src.llm.generator.read_file", return_value=""):
+            result = generate_content(state, resolved)
+
+        # The TOC should appear after title block
+        lines = result.split("\n")
+        # Find the line after the title block separator
+        assert "---" in lines[2]
+
+    def test_intro_section_present(self, mock_call_llm):
+        """Test that introduction section is present in output."""
+        state = AppState(
+            title="Test Document",
+            intro_file="intro.md",
+            chapters=[],
+        )
+        resolved = ResolvedContext()
+
+        with patch("src.llm.generator.read_file") as mock_read:
+            mock_read.return_value = "Intro content here"
+
+            generate_content(state, resolved)
+
+            # Should have called summarize_intro
+            assert mock_call_llm.call_count == 2  # intro + TOC
+
+    def test_chapter_sections_present(self, mock_call_llm):
+        """Test that chapter sections are present in output."""
+        state = AppState(
+            title="Test Document",
+            intro_file=None,
+            chapters=[
+                ChapterEntry(file_path="ch1.md", custom_title="Chapter One"),
+                ChapterEntry(file_path="ch2.md", custom_title="Chapter Two"),
+            ],
+        )
+        resolved = ResolvedContext()
+
+        with patch("src.llm.generator.read_file", return_value=""):
+            generate_content(state, resolved)
+
+        # Should have called structure_chapter for each chapter
+        # Intro (1) + TOC (1) + chapters (2) = 4 calls
+        assert mock_call_llm.call_count == 4
+
+
+class TestResolvedContext:
+    """Tests for the ResolvedContext dataclass."""
+
+    def test_default_values(self):
+        """Test that ResolvedContext has correct default values."""
+        ctx = ResolvedContext()
+
+        assert ctx.skipped == []
+        assert ctx.provided == []
+        assert ctx.to_summarize == []
+
+    def test_with_values(self):
+        """Test that ResolvedContext accepts custom values."""
+        from src.scanner.ref_scanner import Ref
+
+        skipped_ref = Ref(
+            type="image",
+            original="test",
+            resolved_path=None,
+            status="missing",
+            source_file=None,  # type: ignore[arg-type]
+            line_number=1,
+        )
+
+        ctx = ResolvedContext(
+            skipped=[skipped_ref],
+            provided=[skipped_ref],
+            to_summarize=[("path.md", "summary")],
+        )
+
+        assert ctx.skipped == [skipped_ref]
+        assert ctx.provided == [skipped_ref]
+        assert ctx.to_summarize == [("path.md", "summary")]

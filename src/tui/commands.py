@@ -4,6 +4,7 @@ import logging
 import shlex
 from dataclasses import dataclass
 
+from src.pipeline.pipeline import run_pipeline_in_background
 from src.tui.state import AppState, ChapterEntry
 
 logger = logging.getLogger(__name__)
@@ -165,20 +166,9 @@ def handle_help(state: AppState) -> None:
 
 def handle_generate(state: AppState) -> None:
     """Generate the document from the outline."""
-    if not state.title or state.title == "Untitled":
-        state.log_lines.append("Error: Please set a title first with /title")
-        return
-
-    if not state.intro_file and not state.chapters:
-        state.log_lines.append("Error: Please add an intro or at least one chapter")
-        return
-
-    # Log the generation request (pipeline not yet implemented)
-    state.log_lines.append(f"Generating document: {state.title}")
-    state.log_lines.append(f"  Intro: {state.intro_file or '(none)'}")
-    state.log_lines.append(f"  Chapters: {len(state.chapters)}")
+    state.log_lines.append("Starting generation in background...")
     logger.info("document_generation_started", extra={"title": state.title})
-    state.log_lines.append("Document generation not yet implemented")
+    run_pipeline_in_background(state)
 
 
 def handle_quit(state: AppState, running_ref: list[bool]) -> None:
