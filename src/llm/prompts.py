@@ -34,20 +34,53 @@ def prompt_structure_chapter(content: str, title: str) -> tuple[str, str]:
 
     Args:
         content: The source content for the chapter.
-        title: The title of the chapter.
+        title: The title of the chapter. If "Chapter N" (default), will auto-generate.
 
     Returns:
         A tuple of (system_prompt, user_prompt).
     """
-    system = (
-        "You are a technical writer. Create a well-structured, condensed chapter. "
-        "Summarize long content, keep key details. Use clear heading hierarchy."
+    # Check if title is a default "Chapter N" - if so, we need to generate a proper title
+    auto_generate_title = (
+        title.startswith("Chapter ")
+        and len(title) > 7
+        and title[7:].replace(" ", "").isdigit()
     )
-    user = f"""Transform this content into a professional chapter titled "{title}":
+
+    if auto_generate_title:
+        chapter_num = title.split()[-1]  # Extract "N" from "Chapter N"
+        system = (
+            "You are a technical writer. Create a short descriptive title (2-6 words) "
+            "for this chapter based on its content, then create the structured chapter."
+        )
+        user = f"""Analyze this content and create a chapter:
 
 ---
 {content}
 ---
+
+First, create a short descriptive title (2-6 words like "System Architecture" or "Data Flow").
+Then create the chapter following these rules:
+- First line must be: ## Chapter {chapter_num}: [your generated title]
+- Add a brief description (2-3 sentences)
+- Use H3 for major sections only
+- For lists/tasks, keep only key items (top 3-5)
+- Skip repetitive details
+- Keep code blocks only if critical
+- Chapter should be 30-50% of original length
+
+Return ONLY:
+## Chapter {chapter_num}: [title]
+[chapter content]"""
+    else:
+        system = (
+            "You are a technical writer. Create a well-structured, condensed chapter. "
+            "Summarize long content, keep key details. Use clear heading hierarchy."
+        )
+        user = f"""Transform this content into a professional chapter titled "{title}":
+
+----
+{content}
+----
 
 Requirements:
 - Start with H2 heading: ## {title}
@@ -59,51 +92,7 @@ Requirements:
 - Total chapter should be 30-50% of original length
 
 Return only valid Markdown chapter content."""
-    return (system, user)
 
-
-def prompt_generate_toc(
-    doc_title: str,
-    chapter_list: list[tuple[str, list[str]]]
-) -> tuple[str, str]:
-    """Generate a prompt to create a table of contents.
-
-    Args:
-        doc_title: The document title.
-        chapter_list: List of tuples of (chapter_title, subheadings_list).
-
-    Returns:
-        A tuple of (system_prompt, user_prompt).
-    """
-    system = (
-        "You are a technical writer. Generate a clean, professional table of contents. "
-        "List only major sections - skip detailed sub-items."
-    )
-
-    chapters_md = []
-    for title, subheadings in chapter_list:
-        # Filter out Stories - only keep major EPICs/topics
-        major_subheadings = [s for s in subheadings if not s.lower().startswith("story")]
-        if major_subheadings:
-            chapters_md.append(f"- {title}")
-            for sub in major_subheadings[:3]:  # Limit to 3 subheadings max
-                chapters_md.append(f"  - {sub}")
-        else:
-            chapters_md.append(f"- {title}")
-
-    chapters_str = "\n".join(chapters_md)
-
-    user = f"""Create a table of contents for "{doc_title}" with this structure:
-
-{chapters_str}
-
-IMPORTANT:
-- Only include major section headings (EPICs, Overview, etc.)
-- EXCLUDE Stories (e.g., "Story 1.1") from TOC
-- Limit to 3 subheadings per chapter maximum
-- Include an "Introduction" entry
-
-Format as a clean Markdown list with 2-space indentation for sub-items."""
     return (system, user)
 
 

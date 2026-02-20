@@ -17,6 +17,7 @@ from src.tui.commands import (
     parse_command,
     handle_title,
     handle_intro,
+    handle_import,
     handle_chapter,
     handle_remove,
     handle_reset,
@@ -59,7 +60,7 @@ class DocForgeApp:
             if input_buf:
                 input_buf.pop()
 
-        elif key == "\x1b":          # ESC → clear buffer
+        elif key == "\x1b":  # ESC → clear buffer
             input_buf.clear()
 
         elif isinstance(key, str) and key.isprintable():
@@ -82,6 +83,8 @@ class DocForgeApp:
             handle_title(self.state, cmd.args)
         elif cmd.name == "intro":
             handle_intro(self.state, cmd.args)
+        elif cmd.name == "import":
+            handle_import(self.state, cmd.args)
         elif cmd.name == "chapter":
             handle_chapter(self.state, cmd.args)
         elif cmd.name == "remove":
@@ -105,22 +108,22 @@ class DocForgeApp:
 
     def _main(self, stdscr):
         curses.curs_set(0)
-        stdscr.nodelay(True)          # non-blocking getch
+        stdscr.nodelay(True)  # non-blocking getch
         stdscr.keypad(True)
 
         # ── Colour pairs ──────────────────────────────────────────────
         curses.start_color()
         curses.use_default_colors()
-        curses.init_pair(1,  curses.COLOR_WHITE,   curses.COLOR_BLUE)    # header bg
-        curses.init_pair(2,  curses.COLOR_CYAN,    -1)                   # border / accent
-        curses.init_pair(3,  curses.COLOR_GREEN,   -1)                   # success / found
-        curses.init_pair(4,  curses.COLOR_YELLOW,  -1)                   # warn / outline
-        curses.init_pair(5,  curses.COLOR_WHITE,   -1)                   # normal text
-        curses.init_pair(6,  curses.COLOR_BLACK,   curses.COLOR_WHITE)   # popup bg
-        curses.init_pair(7,  curses.COLOR_MAGENTA, -1)                   # prompt >
-        curses.init_pair(8,  curses.COLOR_RED,     -1)                   # error
-        curses.init_pair(9,  curses.COLOR_WHITE,   curses.COLOR_CYAN)    # popup selected
-        curses.init_pair(10, curses.COLOR_BLACK,   curses.COLOR_YELLOW)  # status bar
+        curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLUE)  # header bg
+        curses.init_pair(2, curses.COLOR_CYAN, -1)  # border / accent
+        curses.init_pair(3, curses.COLOR_GREEN, -1)  # success / found
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)  # warn / outline
+        curses.init_pair(5, curses.COLOR_WHITE, -1)  # normal text
+        curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_WHITE)  # popup bg
+        curses.init_pair(7, curses.COLOR_MAGENTA, -1)  # prompt >
+        curses.init_pair(8, curses.COLOR_RED, -1)  # error
+        curses.init_pair(9, curses.COLOR_WHITE, curses.COLOR_CYAN)  # popup selected
+        curses.init_pair(10, curses.COLOR_BLACK, curses.COLOR_YELLOW)  # status bar
 
         input_buf: list[str] = []
 
@@ -156,21 +159,21 @@ class DocForgeApp:
             #  │ input bar  (1 row)                                       │
             #  └─────────────────────────────────────────────────────────┘
 
-            HEADER_H    = 2
-            INPUT_H     = 3          # status + prompt
-            LOG_H       = min(12, max(6, h // 5))
-            BODY_H      = h - HEADER_H - LOG_H - INPUT_H
-            SRC_W       = max(24, w * 30 // 100)
-            OUT_W       = w - SRC_W
+            HEADER_H = 2
+            INPUT_H = 3  # status + prompt
+            LOG_H = min(12, max(6, h // 5))
+            BODY_H = h - HEADER_H - LOG_H - INPUT_H
+            SRC_W = max(24, w * 30 // 100)
+            OUT_W = w - SRC_W
 
-            src_top     = HEADER_H
-            src_left    = 0
-            out_top     = HEADER_H
-            out_left    = SRC_W
-            log_top     = HEADER_H + BODY_H
-            log_left    = 0
-            bar_top     = h - INPUT_H
-            bar_left    = 0
+            src_top = HEADER_H
+            src_left = 0
+            out_top = HEADER_H
+            out_left = SRC_W
+            log_top = HEADER_H + BODY_H
+            log_left = 0
+            bar_top = h - INPUT_H
+            bar_left = 0
 
             stdscr.erase()
 
@@ -202,7 +205,7 @@ class DocForgeApp:
             stdscr.refresh()
 
             # ── Input ─────────────────────────────────────────────────
-            curses.napms(16)          # ~60 fps cap
+            curses.napms(16)  # ~60 fps cap
             try:
                 line, quit_now = self._handle_input(stdscr, input_buf)
             except curses.error:

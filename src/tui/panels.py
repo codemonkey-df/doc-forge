@@ -10,6 +10,7 @@ from src.tui.state import AppState
 #  Low-level helpers
 # ═══════════════════════════════════════════════════════════════════════════ #
 
+
 def _safe_addstr(win, y: int, x: int, text: str, attr: int = 0) -> None:
     """addstr that silently ignores out-of-bounds writes."""
     try:
@@ -24,8 +25,9 @@ def _safe_addstr(win, y: int, x: int, text: str, attr: int = 0) -> None:
         pass
 
 
-def _draw_box(win, top: int, left: int, height: int, width: int,
-              title: str = "", attr: int = 0) -> None:
+def _draw_box(
+    win, top: int, left: int, height: int, width: int, title: str = "", attr: int = 0
+) -> None:
     """Draw a rounded box with optional title."""
     if height < 2 or width < 4:
         return
@@ -73,10 +75,11 @@ def _draw_box(win, top: int, left: int, height: int, width: int,
 #  Public panel drawers
 # ═══════════════════════════════════════════════════════════════════════════ #
 
+
 def draw_header(win, top: int, left: int, width: int) -> None:
     """Full-width title bar (2 rows)."""
-    attr_bg  = curses.color_pair(1) | curses.A_BOLD
-    attr_sub = curses.color_pair(2)
+    attr_bg = curses.color_pair(1) | curses.A_BOLD
+    _ = curses.color_pair(2)
 
     title = " ⚡ DocForge"
     subtitle = "Document Creator"
@@ -96,14 +99,15 @@ def draw_header(win, top: int, left: int, width: int) -> None:
     _safe_addstr(win, top + 1, left, sep, curses.color_pair(2))
 
 
-def draw_sources_panel(win, top: int, left: int, height: int, width: int,
-                        state: AppState) -> None:
+def draw_sources_panel(
+    win, top: int, left: int, height: int, width: int, state: AppState
+) -> None:
     """Left column: numbered list of detected markdown files."""
     border_attr = curses.color_pair(2)
-    title_attr  = curses.color_pair(2) | curses.A_BOLD
-    used_attr   = curses.color_pair(3)          # green ✓
-    num_attr    = curses.color_pair(4)           # yellow index
-    dim_attr    = curses.A_DIM
+    _ = curses.color_pair(2) | curses.A_BOLD
+    used_attr = curses.color_pair(3)  # green ✓
+    num_attr = curses.color_pair(4)  # yellow index
+    dim_attr = curses.A_DIM
 
     _draw_box(win, top, left, height, width, title=" Sources ", attr=border_attr)
 
@@ -119,18 +123,18 @@ def draw_sources_panel(win, top: int, left: int, height: int, width: int,
             _safe_addstr(win, row, left + 2, "…", dim_attr)
             break
 
-        is_intro   = filepath == state.intro_file
+        is_intro = filepath == state.intro_file
         is_chapter = any(c.file_path == filepath for c in state.chapters)
-        used       = is_intro or is_chapter
+        used = is_intro or is_chapter
 
         # index badge
         badge = f"[{idx:>2}]"
         _safe_addstr(win, row, left + 2, badge, num_attr)
 
         # filename (truncated)
-        name_x   = left + 2 + len(badge) + 1
+        name_x = left + 2 + len(badge) + 1
         max_name = inner_w - len(badge) - 3
-        name     = filepath[:max_name]
+        name = filepath[:max_name]
 
         if used:
             _safe_addstr(win, row, name_x, name, used_attr)
@@ -142,20 +146,21 @@ def draw_sources_panel(win, top: int, left: int, height: int, width: int,
         row += 1
 
 
-def draw_outline_panel(win, top: int, left: int, height: int, width: int,
-                        state: AppState) -> None:
+def draw_outline_panel(
+    win, top: int, left: int, height: int, width: int, state: AppState
+) -> None:
     """Right column: document outline — title, intro, chapters."""
-    border_attr  = curses.color_pair(4)
-    label_attr   = curses.color_pair(4) | curses.A_BOLD
-    value_attr   = curses.color_pair(5) | curses.A_BOLD
+    border_attr = curses.color_pair(4)
+    label_attr = curses.color_pair(4) | curses.A_BOLD
+    value_attr = curses.color_pair(5) | curses.A_BOLD
     chapter_attr = curses.color_pair(3)
-    dim_attr     = curses.A_DIM
-    accent_attr  = curses.color_pair(2)
+    dim_attr = curses.A_DIM
+    accent_attr = curses.color_pair(2)
 
     _draw_box(win, top, left, height, width, title=" Outline ", attr=border_attr)
 
     inner_w = width - 4
-    row     = top + 1
+    row = top + 1
 
     def put_row(label: str, value: str, la=label_attr, va=value_attr):
         nonlocal row
@@ -163,7 +168,7 @@ def draw_outline_panel(win, top: int, left: int, height: int, width: int,
             return
         _safe_addstr(win, row, left + 2, label, la)
         vx = left + 2 + len(label)
-        _safe_addstr(win, row, vx, value[:max(0, inner_w - len(label))], va)
+        _safe_addstr(win, row, vx, value[: max(0, inner_w - len(label))], va)
         row += 1
 
     # ── Title ─────────────────────────────────────────────────────────
@@ -194,18 +199,18 @@ def draw_outline_panel(win, top: int, left: int, height: int, width: int,
                 _safe_addstr(win, row, left + 2, "  …", dim_attr)
                 break
             title = ch.custom_title or ch.file_path
-            line  = f"  {i}. {title}"
-            _safe_addstr(win, row, left + 2,
-                         line[:inner_w], chapter_attr)
+            line = f"  {i}. {title}"
+            _safe_addstr(win, row, left + 2, line[:inner_w], chapter_attr)
             row += 1
 
 
-def draw_log_panel(win, top: int, left: int, height: int, width: int,
-                   state: AppState) -> None:
+def draw_log_panel(
+    win, top: int, left: int, height: int, width: int, state: AppState
+) -> None:
     """Full-width log panel at the bottom."""
     border_attr = curses.color_pair(7)
-    dim_attr    = curses.A_DIM
-    err_attr    = curses.color_pair(8)
+    dim_attr = curses.A_DIM
+    err_attr = curses.color_pair(8)
 
     _draw_box(win, top, left, height, width, title=" Log ", attr=border_attr)
 
@@ -221,7 +226,7 @@ def draw_log_panel(win, top: int, left: int, height: int, width: int,
             attr = err_attr
         elif line.startswith("DocForge") or line.startswith("Starting"):
             attr = curses.color_pair(3)
-        elif line.startswith("  "):          # help indented lines
+        elif line.startswith("  "):  # help indented lines
             attr = dim_attr
         else:
             attr = curses.color_pair(5)
@@ -229,8 +234,9 @@ def draw_log_panel(win, top: int, left: int, height: int, width: int,
         _safe_addstr(win, row, left + 2, line[:inner_w], attr)
 
 
-def draw_input_bar(win, top: int, left: int, height: int, width: int,
-                   input_buf: list[str]) -> None:
+def draw_input_bar(
+    win, top: int, left: int, height: int, width: int, input_buf: list[str]
+) -> None:
     """
     Bottom input area:
       row 0 — thin divider + key hints
@@ -247,10 +253,10 @@ def draw_input_bar(win, top: int, left: int, height: int, width: int,
     _safe_addstr(win, top, hint_x, hints, curses.color_pair(10))
 
     # Row 1: prompt
-    prompt       = "❯ "
-    prompt_attr  = curses.color_pair(7) | curses.A_BOLD
-    text         = "".join(input_buf)
-    text_attr    = curses.color_pair(5) | curses.A_BOLD
+    prompt = "❯ "
+    prompt_attr = curses.color_pair(7) | curses.A_BOLD
+    text = "".join(input_buf)
+    text_attr = curses.color_pair(5) | curses.A_BOLD
 
     if top + 1 < h:
         _safe_addstr(win, top + 1, left + 1, prompt, prompt_attr)
@@ -261,15 +267,16 @@ def draw_input_bar(win, top: int, left: int, height: int, width: int,
         cursor_x = px + len(text)
         if cursor_x < width - 1:
             try:
-                win.addstr(top + 1, cursor_x, "▌",
-                           curses.color_pair(7) | curses.A_BLINK)
+                win.addstr(
+                    top + 1, cursor_x, "▌", curses.color_pair(7) | curses.A_BLINK
+                )
             except curses.error:
                 pass
 
 
-def draw_command_popup(win, top: int, left: int,
-                       matches: list[tuple[str, str]],
-                       prefix: str) -> None:
+def draw_command_popup(
+    win, top: int, left: int, matches: list[tuple[str, str]], prefix: str
+) -> None:
     """
     Floating autocomplete popup above the input bar.
 
@@ -281,10 +288,10 @@ def draw_command_popup(win, top: int, left: int,
 
     h, w = win.getmaxyx()
 
-    max_cmd  = max(len(m[0]) for m in matches)
+    max_cmd = max(len(m[0]) for m in matches)
     max_desc = max(len(m[1]) for m in matches)
-    box_w    = max_cmd + max_desc + 7   # "  /cmd  desc  "
-    box_h    = len(matches) + 2         # border top + border bottom
+    box_w = max_cmd + max_desc + 7  # "  /cmd  desc  "
+    box_h = len(matches) + 2  # border top + border bottom
 
     # clamp position
     if top < 0:
@@ -292,11 +299,11 @@ def draw_command_popup(win, top: int, left: int,
     if left + box_w >= w:
         left = max(0, w - box_w - 1)
 
-    bg_attr      = curses.color_pair(6)
-    cmd_attr     = curses.color_pair(9) | curses.A_BOLD
-    desc_attr    = curses.color_pair(6)
-    prefix_attr  = curses.color_pair(9) | curses.A_BOLD | curses.A_UNDERLINE
-    border_attr  = curses.color_pair(2)
+    bg_attr = curses.color_pair(6)
+    cmd_attr = curses.color_pair(9) | curses.A_BOLD
+    desc_attr = curses.color_pair(6)
+    prefix_attr = curses.color_pair(9) | curses.A_BOLD | curses.A_UNDERLINE
+    border_attr = curses.color_pair(2)
 
     # draw background + border
     for r in range(box_h):
@@ -317,7 +324,7 @@ def draw_command_popup(win, top: int, left: int,
         if prefix and cmd.startswith(prefix):
             _safe_addstr(win, row, x, prefix, prefix_attr)
             x += len(prefix)
-            remainder = cmd[len(prefix):]
+            remainder = cmd[len(prefix) :]
             _safe_addstr(win, row, x, remainder, cmd_attr)
             x += len(remainder)
         else:
@@ -329,4 +336,4 @@ def draw_command_popup(win, top: int, left: int,
         x += pad
 
         # description (dim)
-        _safe_addstr(win, row, x, desc[:max(0, box_w - (x - left) - 2)], desc_attr)
+        _safe_addstr(win, row, x, desc[: max(0, box_w - (x - left) - 2)], desc_attr)

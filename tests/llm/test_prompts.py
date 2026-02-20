@@ -1,7 +1,6 @@
 """Unit tests for prompt templates."""
 
 from src.llm.prompts import (
-    prompt_generate_toc,
     prompt_self_heal,
     prompt_structure_chapter,
     prompt_summarize_intro,
@@ -47,38 +46,6 @@ class TestPromptStructureChapter:
 
         assert title in user
         assert f'"{title}"' in user
-
-
-class TestPromptGenerateToc:
-    """Tests for prompt_generate_toc."""
-
-    def test_returns_non_empty_tuple(self) -> None:
-        """Test that the function returns a non-empty tuple."""
-        # New format: list of tuples (chapter_title, subheadings_list)
-        chapters = [("Chapter 1", []), ("Chapter 2", ["Sub A", "Sub B"])]
-        result = prompt_generate_toc("My Document", chapters)
-
-        assert isinstance(result, tuple)
-        assert len(result) == 2
-        assert result[0]  # system prompt not empty
-        assert result[1]  # user prompt not empty
-
-    def test_includes_chapters_in_user_prompt(self) -> None:
-        """Test that chapter titles are included in the user prompt."""
-        # New format: list of tuples (chapter_title, subheadings_list)
-        chapters = [("Chapter 1", []), ("Chapter 2", ["Sub A", "Sub B"])]
-        _, user = prompt_generate_toc("Doc Title", chapters)
-
-        assert "Chapter 1" in user
-        assert "Chapter 2" in user
-
-    def test_includes_subheadings_in_user_prompt(self) -> None:
-        """Test that subheadings are included in the user prompt."""
-        chapters = [("Chapter 1", ["Introduction", "Background"])]
-        _, user = prompt_generate_toc("Doc Title", chapters)
-
-        assert "Introduction" in user
-        assert "Background" in user
 
 
 class TestPromptSelfHeal:
