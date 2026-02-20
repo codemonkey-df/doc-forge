@@ -1,10 +1,8 @@
 """Command parsing and handlers for DocForge TUI."""
 
 import logging
-import re
 import shlex
 from dataclasses import dataclass
-from pathlib import Path
 from pathlib import Path
 
 from src.pipeline.pipeline import run_pipeline_in_background
@@ -14,15 +12,15 @@ logger = logging.getLogger(__name__)
 
 # ── Autocomplete metadata (used by the popup in panels.py) ────────────────
 COMMAND_DESCRIPTIONS: dict[str, str] = {
-    "title":    "Set document title",
-    "intro":    "Set intro file by ID",
-    "import":   "Import parsed MD as chapter",
-    "chapter":  "Add chapter by ID",
-    "remove":   "Remove chapter by index",
-    "reset":    "Clear intro & chapters",
+    "title": "Set document title",
+    "intro": "Set intro file by ID",
+    "import": "Import parsed MD as chapter",
+    "chapter": "Add chapter by ID",
+    "remove": "Remove chapter by index",
+    "reset": "Clear intro & chapters",
     "generate": "Generate the document",
-    "help":     "Show all commands",
-    "quit":     "Exit DocForge",
+    "help": "Show all commands",
+    "quit": "Exit DocForge",
 }
 
 
@@ -116,59 +114,6 @@ def handle_import(state: AppState, args: list[str]) -> None:
         state.log_lines.append(f"Invalid ID: {args[0]}")
 
 
-def handle_import(state: AppState, args: list[str]) -> None:
-    """Import a previously generated MD file as the document content."""
-    if not args:
-        state.log_lines.append("Usage: /import <id>")
-        return
-    try:
-        idx = int(args[0]) - 1
-        if idx < 0 or idx >= len(state.detected_files):
-            state.log_lines.append(f"Invalid ID: {args[0]}")
-            return
-        filename = state.detected_files[idx]
-        state.imported_file = filename
-        # Derive title from filename (remove extension, replace special chars with spaces)
-        title = Path(filename).stem
-        title = re.sub(r"[-_]+", " ", title)
-        title = re.sub(r"[^a-zA-Z0-9 ]+", "", title)
-        title = title.strip()
-        if not title:
-            title = "Untitled"
-        state.title = title
-        state.log_lines.append(f"Imported: {filename} (title: {title})")
-        logger.info("file_imported", extra={"filename": filename, "title": title})
-    except ValueError:
-        state.log_lines.append(f"Invalid ID: {args[0]}")
-
-
-def handle_import(state: AppState, args: list[str]) -> None:
-    """Import a parsed MD file by numeric ID, deriving title from filename."""
-    if not args:
-        state.log_lines.append("Usage: /import <id>")
-        return
-    try:
-        idx = int(args[0]) - 1
-        if idx < 0 or idx >= len(state.detected_files):
-            state.log_lines.append(f"Invalid ID: {args[0]}")
-            return
-        filename = state.detected_files[idx]
-        state.imported_file = filename
-        # Derive title from filename: remove extension, replace special chars with spaces
-        title = Path(filename).stem
-        title = re.sub(r"[-_]+", " ", title)
-        title = re.sub(r"[^a-zA-Z0-9\s]", "", title)
-        title = title.strip()
-        if not title:
-            title = "Untitled"
-        state.title = title
-        state.log_lines.append(f"Imported: {filename}")
-        state.log_lines.append(f"Title derived: {title}")
-        logger.info("file_imported", extra={"filename": filename, "title": title})
-    except ValueError:
-        state.log_lines.append(f"Invalid ID: {args[0]}")
-
-
 def handle_chapter(state: AppState, args: list[str]) -> None:
     """Add a chapter by numeric ID, optionally with a custom title."""
     if not args:
@@ -187,7 +132,9 @@ def handle_chapter(state: AppState, args: list[str]) -> None:
             state.log_lines.append(f"Added chapter: {filename} (title: {custom_title})")
         else:
             state.log_lines.append(f"Added chapter: {filename}")
-        logger.info("chapter_added", extra={"filename": filename, "custom_title": custom_title})
+        logger.info(
+            "chapter_added", extra={"filename": filename, "custom_title": custom_title}
+        )
     except ValueError:
         state.log_lines.append(f"Invalid ID: {args[0]}")
 

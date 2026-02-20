@@ -1,7 +1,6 @@
 """LiteLLM client wrapper for LLM interactions."""
 
 import logging
-from typing import Optional
 
 import litellm
 from src.config import LlmConfig
@@ -70,7 +69,9 @@ def call_llm(system: str, user: str, config: LlmConfig, stage: str = "llm") -> s
         content = response.choices[0].message.content  # type: ignore[return-value]
 
         # Log the response
-        content_display = content[:500] + "..." if content and len(content) > 500 else content
+        content_display = (
+            content[:500] + "..." if content and len(content) > 500 else content
+        )
         logger.info(
             "llm_call_complete",
             extra={

@@ -84,7 +84,10 @@ def generate_content(
     state.log_lines.append("Summarizing introduction...")
     intro_content = read_file(state.intro_file)
 
-    logger.info("intro_source_loaded", extra={"intro_file": state.intro_file, "content_len": len(intro_content)})
+    logger.info(
+        "intro_source_loaded",
+        extra={"intro_file": state.intro_file, "content_len": len(intro_content)},
+    )
 
     if not intro_content.strip():
         logger.warning("Intro source content is empty!")
@@ -92,7 +95,13 @@ def generate_content(
     system, user = prompt_summarize_intro(intro_content)
     intro_md = call_llm(system, user, config, stage="intro")
 
-    logger.info("intro_generated", extra={"intro_len": len(intro_md), "intro_preview": intro_md[:200] if intro_md else "EMPTY"})
+    logger.info(
+        "intro_generated",
+        extra={
+            "intro_len": len(intro_md),
+            "intro_preview": intro_md[:200] if intro_md else "EMPTY",
+        },
+    )
 
     # Step 2: Structure each chapter
     chapter_mds = []
@@ -103,7 +112,13 @@ def generate_content(
         # Read chapter content
         chapter_content = read_file(chapter.file_path)
 
-        logger.info("chapter_source_loaded", extra={"chapter_file": chapter.file_path, "content_len": len(chapter_content)})
+        logger.info(
+            "chapter_source_loaded",
+            extra={
+                "chapter_file": chapter.file_path,
+                "content_len": len(chapter_content),
+            },
+        )
 
         if not chapter_content.strip():
             logger.warning(f"Chapter source content is empty: {chapter.file_path}")
@@ -117,9 +132,16 @@ def generate_content(
                 )
 
         system, user = prompt_structure_chapter(chapter_content + extra_context, title)
-        chapter_md = call_llm(system, user, config, stage=f"chapter_{i+1}")
+        chapter_md = call_llm(system, user, config, stage=f"chapter_{i + 1}")
 
-        logger.info("chapter_generated", extra={"chapter": title, "chapter_len": len(chapter_md), "preview": chapter_md[:200] if chapter_md else "EMPTY"})
+        logger.info(
+            "chapter_generated",
+            extra={
+                "chapter": title,
+                "chapter_len": len(chapter_md),
+                "preview": chapter_md[:200] if chapter_md else "EMPTY",
+            },
+        )
 
         chapter_mds.append(chapter_md)
 
@@ -151,7 +173,13 @@ def generate_from_imported(
     state.log_lines.append("Reading imported file...")
     imported_content = read_file(state.imported_file)
 
-    logger.info("imported_source_loaded", extra={"imported_file": state.imported_file, "content_len": len(imported_content)})
+    logger.info(
+        "imported_source_loaded",
+        extra={
+            "imported_file": state.imported_file,
+            "content_len": len(imported_content),
+        },
+    )
 
     if not imported_content.strip():
         logger.warning("Imported source content is empty!")
@@ -170,7 +198,13 @@ def generate_from_imported(
         # Read chapter content
         chapter_content = read_file(chapter.file_path)
 
-        logger.info("chapter_source_loaded", extra={"chapter_file": chapter.file_path, "content_len": len(chapter_content)})
+        logger.info(
+            "chapter_source_loaded",
+            extra={
+                "chapter_file": chapter.file_path,
+                "content_len": len(chapter_content),
+            },
+        )
 
         if not chapter_content.strip():
             logger.warning(f"Chapter source content is empty: {chapter.file_path}")
@@ -186,7 +220,14 @@ def generate_from_imported(
         system, user = prompt_structure_chapter(chapter_content + extra_context, title)
         chapter_md = call_llm(system, user, config, stage=f"chapter_{chapter_number}")
 
-        logger.info("chapter_generated", extra={"chapter": title, "chapter_len": len(chapter_md), "preview": chapter_md[:200] if chapter_md else "EMPTY"})
+        logger.info(
+            "chapter_generated",
+            extra={
+                "chapter": title,
+                "chapter_len": len(chapter_md),
+                "preview": chapter_md[:200] if chapter_md else "EMPTY",
+            },
+        )
 
         chapter_mds.append(chapter_md)
 

@@ -184,8 +184,6 @@ def run_pipeline_in_background(state: AppState) -> None:
     state_copy = copy.copy(state)
     # Use a fresh log_lines list for the thread
     state_copy.log_lines = []
-    # Track how many lines we had before running
-    lines_before = len(state.log_lines)
 
     def run():
         try:
