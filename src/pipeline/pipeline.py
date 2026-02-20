@@ -121,11 +121,14 @@ def slugify(text: str) -> str:
 def run_pipeline(state: AppState) -> Path | None:
     """Run the complete document generation pipeline.
 
+    Pauses after writing the markdown file and waits for the user to
+    /accept or /cancel before proceeding to DOCX conversion.
+
     Args:
         state: The application state containing document configuration.
 
     Returns:
-        Path to the output .docx file, or None if pipeline failed.
+        Path to the output .docx file, or None if pipeline failed / cancelled.
     """
     try:
         # Initialize LLM config
@@ -156,6 +159,36 @@ def run_pipeline(state: AppState) -> Path | None:
         state.log_lines.append("Writing output...")
         output_path = write_output(markdown, state)
 
+        # ── Preview pause ────────────────────────────────────────────────
+        # Signal the TUI that the markdown is ready for review.
+        state.pending_md_path = output_path
+        state.preview_scroll = 0
+        state.preview_accepted.clear()
+        state.preview_cancelled.clear()
+        state.preview_mode = True  # switches TUI to preview layout
+        state.md_ready.set()       # unblocks any waiting TUI code
+
+        state.log_lines.append(
+            f"Preview ready — use /accept or /cancel  (file: {output_path})"
+        )
+        state.log_lines.append(
+            f"To edit manually: open  {output_path.resolve()}  in your editor, "
+            "then /accept"
+        )
+
+        # Block until user makes a decision
+        while True:
+            if state.preview_accepted.is_set():
+                break
+            if state.preview_cancelled.is_set():
+                state.log_lines.append("Generation cancelled — settings preserved.")
+                _reset_preview_state(state)
+                return None
+            threading.Event().wait(0.1)  # lightweight sleep
+
+        # User accepted — continue to DOCX
+        _reset_preview_state(state)
+
         # Stage 6: Convert to DOCX
         state.log_lines.append("Converting to DOCX...")
         docx_path = output_path.with_suffix(".docx")
@@ -169,7 +202,18 @@ def run_pipeline(state: AppState) -> Path | None:
     except PipelineError as e:
         state.log_lines.append(f"Error [{e.stage}]: {e.message}")
         logger.error("pipeline_error", extra={"stage": e.stage, "error_msg": e.message})
+        _reset_preview_state(state)
         return None
+
+
+def _reset_preview_state(state: AppState) -> None:
+    """Clear preview-related state flags."""
+    state.preview_mode = False
+    state.pending_md_path = None
+    state.preview_scroll = 0
+    state.md_ready.clear()
+    state.preview_accepted.clear()
+    state.preview_cancelled.clear()
 
 
 def run_pipeline_in_background(state: AppState) -> None:
@@ -178,24 +222,17 @@ def run_pipeline_in_background(state: AppState) -> None:
     Args:
         state: The application state.
     """
-    import copy
-
-    # Create a shallow copy but manually handle the thread-unsafe parts
-    state_copy = copy.copy(state)
-    # Use a fresh log_lines list for the thread
-    state_copy.log_lines = []
-
+    # Pass the *original* state directly so that any attribute mutations
+    # (e.g. preview_mode, pending_md_path) are immediately visible to the
+    # TUI render loop.  The previous shallow-copy approach meant the TUI
+    # was watching a different object and never saw preview_mode flip to True.
     def run():
         try:
-            run_pipeline(state_copy)
+            run_pipeline(state)
         except Exception:
-            # Log unexpected errors
             logger.exception("pipeline_error_unexpected")
         finally:
-            # Signal completion and update log lines
-            new_lines = state_copy.log_lines
-            state.log_lines.extend(new_lines)
             state.pipeline_complete.set()
 
-    thread = threading.Thread(target=run)
+    thread = threading.Thread(target=run, daemon=True)
     thread.start()

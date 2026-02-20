@@ -21,6 +21,22 @@ COMMAND_DESCRIPTIONS: dict[str, str] = {
     "generate": "Generate the document",
     "help": "Show all commands",
     "quit": "Exit DocForge",
+    # Preview-mode commands (always registered so autocomplete works)
+    "accept": "Accept preview and convert to DOCX",
+    "cancel": "Cancel generation and discard MD",
+}
+
+# Commands shown in normal (non-preview) mode autocomplete
+NORMAL_COMMANDS = {
+    k: v for k, v in COMMAND_DESCRIPTIONS.items()
+    if k not in ("accept", "cancel")
+}
+
+# Commands shown in preview mode autocomplete
+PREVIEW_COMMANDS = {
+    "accept": COMMAND_DESCRIPTIONS["accept"],
+    "cancel": COMMAND_DESCRIPTIONS["cancel"],
+    "quit": COMMAND_DESCRIPTIONS["quit"],
 }
 
 
@@ -176,9 +192,33 @@ def handle_help(state: AppState) -> None:
 
 def handle_generate(state: AppState) -> None:
     """Generate the document from the outline."""
+    if state.preview_mode:
+        state.log_lines.append("Already in preview mode — /accept or /cancel first")
+        return
     state.log_lines.append("Starting generation in background…")
     logger.info("document_generation_started", extra={"title": state.title})
     run_pipeline_in_background(state)
+
+
+def handle_accept(state: AppState) -> None:
+    """Accept the previewed markdown and proceed to DOCX conversion."""
+    if not state.preview_mode:
+        state.log_lines.append("Nothing to accept — run /generate first")
+        return
+    state.log_lines.append("Accepted — converting to DOCX…")
+    logger.info("preview_accepted")
+    state.preview_accepted.set()
+
+
+def handle_cancel(state: AppState) -> None:
+    """Cancel generation and discard the pending markdown."""
+    if not state.preview_mode:
+        state.log_lines.append("Nothing to cancel.")
+        return
+    state.log_lines.append("Cancelling generation…")
+    logger.info("preview_cancelled")
+    state.preview_cancelled.set()
+    # preview_mode flag is cleared by the pipeline thread after it picks up the signal
 
 
 def handle_quit(state: AppState, running_ref: list[bool]) -> None:
