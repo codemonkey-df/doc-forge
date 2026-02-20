@@ -236,7 +236,8 @@ def draw_log_panel(
 
 
 def draw_input_bar(
-    win, top: int, left: int, height: int, width: int, input_buf: list[str]
+    win, top: int, left: int, height: int, width: int, input_buf: list[str],
+    preview_mode: bool = False,
 ) -> None:
     """
     Bottom input area:
@@ -246,8 +247,11 @@ def draw_input_bar(
     """
     h, w = win.getmaxyx()
 
-    # Row 0: status/hint bar
-    hints = " /help · /generate · /quit "
+    # Row 0: status/hint bar — show different hints in preview mode
+    if preview_mode:
+        hints = " /accept · /cancel  ↑↓ scroll "
+    else:
+        hints = " /help · /generate · /quit "
     hint_x = max(left, width - len(hints) - 1)
     status = "─" * (hint_x - left)
     _safe_addstr(win, top, left, status, curses.color_pair(2) | curses.A_DIM)
@@ -325,7 +329,7 @@ def draw_command_popup(
         if prefix and cmd.startswith(prefix):
             _safe_addstr(win, row, x, prefix, prefix_attr)
             x += len(prefix)
-            remainder = cmd[len(prefix) :]
+            remainder = cmd[len(prefix):]
             _safe_addstr(win, row, x, remainder, cmd_attr)
             x += len(remainder)
         else:
@@ -338,3 +342,107 @@ def draw_command_popup(
 
         # description (dim)
         _safe_addstr(win, row, x, desc[: max(0, box_w - (x - left) - 2)], desc_attr)
+
+
+# ═══════════════════════════════════════════════════════════════════════════ #
+#  Preview panel (shown in place of Sources + Outline when in preview mode)
+# ═══════════════════════════════════════════════════════════════════════════ #
+
+# Markdown token → colour heuristics
+_MD_HEADING_ATTR = None   # resolved at draw time (colour pair 4 bold)
+_MD_CODE_ATTR    = None   # colour pair 2
+_MD_BULLET_ATTR  = None   # colour pair 3
+
+
+def _md_line_attr(line: str) -> int:
+    """Return a curses attribute for a markdown line based on its content."""
+    stripped = line.lstrip()
+    if stripped.startswith("#"):
+        return curses.color_pair(4) | curses.A_BOLD
+    if stripped.startswith("```") or stripped.startswith("    "):
+        return curses.color_pair(2)
+    if stripped.startswith(("- ", "* ", "+ ")) or (
+        len(stripped) > 2 and stripped[0].isdigit() and stripped[1] in ".)"
+    ):
+        return curses.color_pair(3)
+    if stripped.startswith(">"):
+        return curses.A_DIM | curses.color_pair(5)
+    if stripped.startswith("---") or stripped.startswith("==="):
+        return curses.color_pair(2) | curses.A_DIM
+    return curses.color_pair(5)
+
+
+def draw_preview_panel(
+    win, top: int, left: int, height: int, width: int, state: AppState
+) -> None:
+    """
+    Full-width panel that renders the generated markdown for review.
+
+    Replaces the Sources + Outline columns when state.preview_mode is True.
+    Supports scrolling via state.preview_scroll.
+    """
+    border_attr = curses.color_pair(3) | curses.A_BOLD   # green border = "needs action"
+    dim_attr    = curses.A_DIM
+    path_attr   = curses.color_pair(2) | curses.A_BOLD
+
+    # ── Load content ───────────────────────────────────────────────────
+    lines: list[str] = []
+    file_label = ""
+    if state.pending_md_path and state.pending_md_path.exists():
+        try:
+            raw = state.pending_md_path.read_text(encoding="utf-8", errors="replace")
+            lines = raw.splitlines()
+            file_label = str(state.pending_md_path.resolve())
+        except OSError:
+            lines = ["(could not read file)"]
+    else:
+        lines = ["(waiting for markdown…)"]
+
+    total_lines = len(lines)
+    inner_h = height - 2          # rows available inside the box
+    inner_w = width - 4           # cols available inside the box
+
+    # Clamp scroll
+    max_scroll = max(0, total_lines - inner_h + 5)
+    state.preview_scroll = max(0, min(state.preview_scroll, max_scroll))
+
+    # ── Title string ────────────────────────────────────────────────────
+    scroll_pct = 0 if max_scroll == 0 else int(state.preview_scroll / max_scroll * 100)
+    box_title = f" Preview  {state.preview_scroll + 1}/{total_lines}  ({scroll_pct}%) "
+
+    _draw_box(win, top, left, height, width, title=box_title, attr=border_attr)
+
+    # ── File path sub-header (row just below the top border) ──────────
+    if file_label and inner_h > 1:
+        path_text = f" {file_label} "
+        _safe_addstr(win, top + 1, left + 2, path_text[:inner_w], path_attr)
+        # separator
+        _safe_addstr(win, top + 2, left + 2, "─" * inner_w, dim_attr)
+        content_start_row = top + 3
+        available_rows = inner_h - 2
+    else:
+        content_start_row = top + 1
+        available_rows = inner_h
+
+    # ── Render visible lines ───────────────────────────────────────────
+    visible = lines[state.preview_scroll: state.preview_scroll + available_rows]
+    for i, line in enumerate(visible):
+        row = content_start_row + i
+        if row >= top + height - 1:
+            break
+        attr = _md_line_attr(line)
+        _safe_addstr(win, row, left + 2, line[:inner_w], attr)
+
+    # ── Scroll indicators ─────────────────────────────────────────────
+    # Up arrow if scrolled down
+    if state.preview_scroll > 0:
+        _safe_addstr(win, top + 1, left + width - 3, "▲", curses.color_pair(7))
+    # Down arrow if more content below
+    if state.preview_scroll < max_scroll:
+        _safe_addstr(win, top + height - 2, left + width - 3, "▼", curses.color_pair(7))
+
+    # ── Action hint inside the panel ──────────────────────────────────
+    hint = " /accept to convert · /cancel to discard "
+    hint_row = top + height - 1
+    hint_x = left + max(2, (width - len(hint)) // 2)
+    _safe_addstr(win, hint_row, hint_x, hint[:inner_w], curses.color_pair(10))

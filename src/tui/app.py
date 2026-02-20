@@ -11,6 +11,7 @@ from src.tui.panels import (
     draw_log_panel,
     draw_input_bar,
     draw_command_popup,
+    draw_preview_panel,
 )
 from src.tui.watcher import FileWatcher
 from src.tui.commands import (
@@ -24,11 +25,12 @@ from src.tui.commands import (
     handle_help,
     handle_quit,
     handle_generate,
+    handle_accept,
+    handle_cancel,
     COMMAND_DESCRIPTIONS,
+    NORMAL_COMMANDS,
+    PREVIEW_COMMANDS,
 )
-
-
-SLASH_COMMANDS = list(COMMAND_DESCRIPTIONS.keys())
 
 
 class DocForgeApp:
@@ -43,13 +45,31 @@ class DocForgeApp:
     #  Input helpers
     # ------------------------------------------------------------------ #
 
-    def _handle_input(self, stdscr, input_buf: list[str]) -> tuple[str | None, bool]:
+    def _handle_input(
+        self, stdscr, input_buf: list[str]
+    ) -> tuple[str | None, bool]:
         """
         Read one character and mutate the input buffer.
 
         Returns (submitted_line_or_None, should_quit).
+        Also handles scroll keys (↑ / ↓ / PgUp / PgDn) when in preview mode.
         """
         key = stdscr.get_wch()
+
+        # ── Scroll keys (only meaningful in preview mode) ──────────────
+        if self.state.preview_mode:
+            if key == curses.KEY_UP:
+                self.state.preview_scroll = max(0, self.state.preview_scroll - 1)
+                return None, False
+            if key == curses.KEY_DOWN:
+                self.state.preview_scroll += 1
+                return None, False
+            if key == curses.KEY_PPAGE:          # Page Up
+                self.state.preview_scroll = max(0, self.state.preview_scroll - 20)
+                return None, False
+            if key == curses.KEY_NPAGE:          # Page Down
+                self.state.preview_scroll += 20
+                return None, False
 
         if key in (curses.KEY_ENTER, "\n", "\r"):
             line = "".join(input_buf)
@@ -79,6 +99,13 @@ class DocForgeApp:
             self.state.log_lines.append(f"Unknown command: {raw}  (try /help)")
             return True
 
+        # ── Preview-mode: only accept / cancel / quit allowed ──────────
+        if self.state.preview_mode and cmd.name not in ("accept", "cancel", "quit"):
+            self.state.log_lines.append(
+                f"In preview mode — only /accept, /cancel, /quit are available"
+            )
+            return True
+
         if cmd.name == "title":
             handle_title(self.state, cmd.args)
         elif cmd.name == "intro":
@@ -95,6 +122,10 @@ class DocForgeApp:
             handle_help(self.state)
         elif cmd.name == "generate":
             handle_generate(self.state)
+        elif cmd.name == "accept":
+            handle_accept(self.state)
+        elif cmd.name == "cancel":
+            handle_cancel(self.state)
         elif cmd.name == "quit":
             running_ref = [True]
             handle_quit(self.state, running_ref)
@@ -114,16 +145,16 @@ class DocForgeApp:
         # ── Colour pairs ──────────────────────────────────────────────
         curses.start_color()
         curses.use_default_colors()
-        curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLUE)  # header bg
-        curses.init_pair(2, curses.COLOR_CYAN, -1)  # border / accent
-        curses.init_pair(3, curses.COLOR_GREEN, -1)  # success / found
-        curses.init_pair(4, curses.COLOR_YELLOW, -1)  # warn / outline
-        curses.init_pair(5, curses.COLOR_WHITE, -1)  # normal text
-        curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_WHITE)  # popup bg
-        curses.init_pair(7, curses.COLOR_MAGENTA, -1)  # prompt >
-        curses.init_pair(8, curses.COLOR_RED, -1)  # error
-        curses.init_pair(9, curses.COLOR_WHITE, curses.COLOR_CYAN)  # popup selected
-        curses.init_pair(10, curses.COLOR_BLACK, curses.COLOR_YELLOW)  # status bar
+        curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLUE)   # header bg
+        curses.init_pair(2, curses.COLOR_CYAN, -1)                    # border / accent
+        curses.init_pair(3, curses.COLOR_GREEN, -1)                   # success / found
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)                  # warn / outline
+        curses.init_pair(5, curses.COLOR_WHITE, -1)                   # normal text
+        curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_WHITE)   # popup bg
+        curses.init_pair(7, curses.COLOR_MAGENTA, -1)                 # prompt >
+        curses.init_pair(8, curses.COLOR_RED, -1)                     # error
+        curses.init_pair(9, curses.COLOR_WHITE, curses.COLOR_CYAN)    # popup selected
+        curses.init_pair(10, curses.COLOR_BLACK, curses.COLOR_YELLOW) # status bar
 
         input_buf: list[str] = []
 
@@ -150,47 +181,74 @@ class DocForgeApp:
 
             # ── Layout maths ──────────────────────────────────────────
             #
-            #  ┌─ header (1 row) ────────────────────────────────────────┐
+            #  Normal mode:
+            #  ┌─ header (2 rows) ───────────────────────────────────────┐
             #  │ Sources (left, 30%)  │ Outline (right, 70%)             │
-            #  ├──────────────────────┤                                   │
+            #  ├──────────────────────┴───────────────────────────────────┤
             #  │ Log (full width, ~8 rows)                                │
             #  ├─────────────────────────────────────────────────────────┤
-            #  │ status bar (1 row)                                       │
-            #  │ input bar  (1 row)                                       │
+            #  │ status bar + input bar  (2 rows)                         │
+            #  └─────────────────────────────────────────────────────────┘
+            #
+            #  Preview mode:
+            #  ┌─ header (2 rows) ───────────────────────────────────────┐
+            #  │        Preview (full width, scrollable)                  │
+            #  ├─────────────────────────────────────────────────────────┤
+            #  │ Log (full width, ~6 rows)                                │
+            #  ├─────────────────────────────────────────────────────────┤
+            #  │ status bar + input bar  (2 rows)                         │
             #  └─────────────────────────────────────────────────────────┘
 
             HEADER_H = 2
-            INPUT_H = 3  # status + prompt
-            LOG_H = min(12, max(6, h // 5))
-            BODY_H = h - HEADER_H - LOG_H - INPUT_H
+            INPUT_H  = 3   # status + prompt + padding
+            LOG_H    = min(10, max(6, h // 6))
+            BODY_H   = h - HEADER_H - LOG_H - INPUT_H
+
             SRC_W = max(24, w * 30 // 100)
             OUT_W = w - SRC_W
 
-            src_top = HEADER_H
+            src_top  = HEADER_H
             src_left = 0
-            out_top = HEADER_H
+            out_top  = HEADER_H
             out_left = SRC_W
-            log_top = HEADER_H + BODY_H
+            log_top  = HEADER_H + BODY_H
             log_left = 0
-            bar_top = h - INPUT_H
+            bar_top  = h - INPUT_H
             bar_left = 0
 
             stdscr.erase()
 
             # ── Draw panels ───────────────────────────────────────────
             draw_header(stdscr, 0, 0, w)
-            draw_sources_panel(stdscr, src_top, src_left, BODY_H, SRC_W, self.state)
-            draw_outline_panel(stdscr, out_top, out_left, BODY_H, OUT_W, self.state)
+
+            if self.state.preview_mode:
+                # Full-width preview replaces Sources + Outline
+                draw_preview_panel(
+                    stdscr, src_top, 0, BODY_H, w, self.state
+                )
+            else:
+                draw_sources_panel(
+                    stdscr, src_top, src_left, BODY_H, SRC_W, self.state
+                )
+                draw_outline_panel(
+                    stdscr, out_top, out_left, BODY_H, OUT_W, self.state
+                )
+
             draw_log_panel(stdscr, log_top, log_left, LOG_H, w, self.state)
-            draw_input_bar(stdscr, bar_top, bar_left, INPUT_H, w, input_buf)
+            draw_input_bar(
+                stdscr, bar_top, bar_left, INPUT_H, w, input_buf,
+                preview_mode=self.state.preview_mode,
+            )
 
             # ── Command popup ─────────────────────────────────────────
             current = "".join(input_buf)
             if current.startswith("/") and len(current) >= 1:
                 prefix = current[1:]
+                # Show only the commands relevant to the current mode
+                cmd_pool = PREVIEW_COMMANDS if self.state.preview_mode else COMMAND_DESCRIPTIONS
                 matches = [
-                    (cmd, COMMAND_DESCRIPTIONS[cmd])
-                    for cmd in SLASH_COMMANDS
+                    (cmd, cmd_pool[cmd])
+                    for cmd in cmd_pool
                     if cmd.startswith(prefix)
                 ]
                 if matches:
